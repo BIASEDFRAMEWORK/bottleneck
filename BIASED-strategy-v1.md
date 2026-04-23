@@ -230,3 +230,146 @@ Execution reveals truth. Truth updates Behavior and Intent.
 
 BIASED does not define how teams work.
 It defines what the system must produce--and enforces it.
+
+## 8. Loops (Continuous System Validation)
+
+### Purpose
+
+Loops define how the system continuously validates and improves itself after deployment.
+
+BIASED does not consider a feature complete at release.
+
+> A feature is valid only while it continues to pass its loops.
+
+This aligns with modern software practices where systems are **continuous, cyclical, and feedback-driven rather than linear** :contentReference[oaicite:0]{index=0}, with feedback loops enabling ongoing improvement and risk reduction :contentReference[oaicite:1]{index=1}.
+
+---
+
+## Core Principle
+
+- Workflows define how features are created  
+- Capabilities define what must exist  
+- **Loops define how systems remain valid over time**
+
+---
+
+## Feature Lifecycle
+
+A feature progresses through two phases:
+
+### 1. Creation Phase (Linear)
+
+Intent → Behavior → Design → Assurance → Security → Execution
+
+---
+
+### 2. Operational Phase (Continuous)
+
+After deployment, the feature enters continuous loops:
+
+- Assurance Loop
+- Execution Loop
+- Cost Loop
+
+---
+
+## 8.1 Assurance Loop (Primary Loop)
+
+### Definition
+
+Continuously validates that system behavior matches defined expectations.
+
+### Flow
+
+Execution → Assurance → Behavior/Design update → redeploy → repeat
+
+### Rules
+
+- BDD scenarios must continuously pass
+- Any failure indicates system drift
+- Failures require immediate correction
+
+### Validation
+
+- FAIL if any scenarios fail
+- FAIL if accuracy falls below threshold
+
+### Principle
+
+> If Assurance fails in production, the system is invalid.
+
+---
+
+## 8.2 Execution Loop
+
+### Definition
+
+Continuously measures real-world system performance and usage.
+
+### Flow
+
+Execution → Metrics → Analysis → Behavior/Intent refinement → repeat
+
+### Measurements
+
+- Adoption rate
+- Task success rate
+- Error rate
+- Latency
+
+### Principle
+
+> Execution reveals truth.
+
+---
+
+## 8.3 Cost Loop
+
+### Definition
+
+Continuously evaluates and optimizes system cost.
+
+### Flow
+
+Execution → Cost measurement → Design adjustment → Assurance → repeat
+
+### Measurements
+
+- Cost per request
+- Total system cost
+- Cost trends
+
+### Rules
+
+- FAIL if cost exceeds defined thresholds
+- WARNING if cost trends upward
+
+### Principle
+
+> Cost is a constraint applied continuously, not a one-time decision.
+
+---
+
+## 8.4 Loop Enforcement
+
+Loops are enforced through:
+
+- Continuous validation (`biased validate`)
+- CI/CD integration
+- Execution telemetry
+
+---
+
+## 8.5 System Validity
+
+A system remains valid only if:
+
+- All capabilities pass validation
+- All loops continue to pass over time
+
+---
+
+## Final Principle
+
+> Shipping is not completion.  
+> Continuous validation is completion.

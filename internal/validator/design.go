@@ -3,6 +3,7 @@ package validator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"biased/internal/models"
 )
@@ -16,17 +17,39 @@ func NewDesignValidator(rootPath string) *DesignValidator {
 }
 
 func (v *DesignValidator) Validate() []models.ValidationResult {
-	path := filepath.Join(v.rootPath, "design", "architecture.md")
-	if _, err := os.Stat(path); err != nil {
-		return []models.ValidationResult{{
+	return []models.ValidationResult{validateDesign(v.rootPath)}
+}
+
+func validateDesign(rootPath string) models.ValidationResult {
+	path := filepath.Join(rootPath, "design", "architecture.md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return models.ValidationResult{
 			Capability: "Design",
 			Status:     models.StatusFail,
 			Message:    "missing architecture.md",
-		}}
+		}
 	}
 
-	return []models.ValidationResult{{
+	text := strings.TrimSpace(string(content))
+	if text == "" {
+		return models.ValidationResult{
+			Capability: "Design",
+			Status:     models.StatusFail,
+			Message:    "architecture.md is empty",
+		}
+	}
+
+	if !containsAnyMarkdownSection(text) {
+		return models.ValidationResult{
+			Capability: "Design",
+			Status:     models.StatusFail,
+			Message:    "section header missing",
+		}
+	}
+
+	return models.ValidationResult{
 		Capability: "Design",
 		Status:     models.StatusPass,
-	}}
+	}
 }

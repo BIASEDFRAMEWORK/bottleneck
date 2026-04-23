@@ -21,35 +21,39 @@ func NewSecurityValidator(rootPath string) *SecurityValidator {
 }
 
 func (v *SecurityValidator) Validate() []models.ValidationResult {
-	path := filepath.Join(v.rootPath, "security", "guardrails.json")
+	return []models.ValidationResult{validateSecurity(v.rootPath)}
+}
+
+func validateSecurity(rootPath string) models.ValidationResult {
+	path := filepath.Join(rootPath, "security", "guardrails.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Security",
 			Status:     models.StatusFail,
 			Message:    "missing guardrails.json",
-		}}
+		}
 	}
 
 	var data securityFile
 	if err := json.Unmarshal(content, &data); err != nil || data.Violations == nil {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Security",
 			Status:     models.StatusFail,
 			Message:    "invalid guardrails.json",
-		}}
+		}
 	}
 
 	if *data.Violations > 0 {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Security",
 			Status:     models.StatusFail,
 			Message:    "violations detected",
-		}}
+		}
 	}
 
-	return []models.ValidationResult{{
+	return models.ValidationResult{
 		Capability: "Security",
 		Status:     models.StatusPass,
-	}}
+	}
 }

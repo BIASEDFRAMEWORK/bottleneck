@@ -25,23 +25,27 @@ func NewAssuranceValidator(rootPath string) *AssuranceValidator {
 }
 
 func (v *AssuranceValidator) Validate() []models.ValidationResult {
-	path := filepath.Join(v.rootPath, "assurance", "results.json")
+	return []models.ValidationResult{validateAssurance(v.rootPath)}
+}
+
+func validateAssurance(rootPath string) models.ValidationResult {
+	path := filepath.Join(rootPath, "assurance", "results.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
 			Message:    "missing results.json",
-		}}
+		}
 	}
 
 	var data assuranceFile
 	if err := json.Unmarshal(content, &data); err != nil {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
 			Message:    "invalid results.json",
-		}}
+		}
 	}
 
 	if data.ScenariosTotal == nil ||
@@ -49,31 +53,31 @@ func (v *AssuranceValidator) Validate() []models.ValidationResult {
 		data.ScenariosFailed == nil ||
 		data.Accuracy == nil ||
 		data.Failures == nil {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
 			Message:    "required fields missing",
-		}}
+		}
 	}
 
 	if *data.ScenariosFailed > 0 {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
-			Message:    "scenarios failed",
-		}}
+			Message:    "scenarios_failed > 0",
+		}
 	}
 
 	if *data.Accuracy < 0.90 {
-		return []models.ValidationResult{{
+		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
 			Message:    "accuracy below threshold",
-		}}
+		}
 	}
 
-	return []models.ValidationResult{{
+	return models.ValidationResult{
 		Capability: "Assurance",
 		Status:     models.StatusPass,
-	}}
+	}
 }

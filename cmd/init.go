@@ -21,15 +21,43 @@ var initDirectories = []string{
 }
 
 var initFiles = map[string]string{
+	"biased/config.yaml":                       defaultConfigYAML,
 	"biased/behavior/behavior-spec.md":         "# Behavior Specification\n\n## Expected Behavior\n\nDescribe intended system behavior.\n\n## Unacceptable Behavior\n\nDescribe behavior the system must prevent.\n",
 	"biased/intent/intent.md":                  "# Intent\n\n## Outcomes\n\nDescribe required outcomes.\n\n## Constraints\n\nDescribe system constraints.\n\n## Success Criteria\n\nDescribe measurable success criteria.\n",
 	"biased/design/architecture.md":            "# Architecture\n\nDescribe system architecture.\n",
 	"biased/assurance/features/sample.feature": "Feature: Sample system validation\n\n  Scenario: System behaves as intended\n    Given the system is initialized\n    When validation artifacts are present\n    Then the outcomes should satisfy BIASED\n",
-	"biased/assurance/results.json":            "{\n  \"scenarios_total\": 1,\n  \"scenarios_passed\": 1,\n  \"scenarios_failed\": 0,\n  \"accuracy\": 1.0,\n  \"failures\": []\n}\n",
+	"biased/assurance/results.json":            "{\n  \"scenarios_total\": 1,\n  \"scenarios_passed\": 1,\n  \"scenarios_failed\": 0,\n  \"failures\": []\n}\n",
 	"biased/security/guardrails.json":          "{\n  \"violations\": 0\n}\n",
 	"biased/execution/telemetry.json":          "{\n  \"adoption_rate\": 0.9,\n  \"error_rate\": 0.01\n}\n",
 	"biased/docs/validation.md":                validationDocumentation,
 }
+
+const defaultConfigYAML = `environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+
+    execution:
+      max_error_rate: 0.05
+      min_adoption: 0.5
+
+  dev:
+    assurance:
+      min_accuracy: 0.85
+
+  test:
+    assurance:
+      min_accuracy: 0.90
+
+  stage:
+    assurance:
+      min_accuracy: 0.93
+
+  production:
+    assurance:
+      min_accuracy: 0.95
+`
 
 const validationDocumentation = `# BIASED Validation
 
@@ -75,7 +103,6 @@ Required JSON structure:
   "scenarios_total": 1,
   "scenarios_passed": 1,
   "scenarios_failed": 0,
-  "accuracy": 1.0,
   "failures": []
 }
 ~~~
@@ -113,7 +140,7 @@ Intent passes only when intent.md exists and includes Outcomes, Constraints, and
 
 Design passes only when architecture.md exists, is not empty, and includes at least one Markdown section header.
 
-Assurance passes only when results.json exists, parses as JSON, includes all required fields, has zero failed scenarios, and has accuracy greater than or equal to 0.90.
+Assurance passes only when results.json exists, parses as JSON, includes all required fields, has failed scenarios at or below the configured max_failures threshold, and has calculated accuracy greater than or equal to the configured min_accuracy threshold.
 
 Security passes only when guardrails.json exists, parses as JSON, includes violations, and violations equals 0.
 
@@ -130,7 +157,7 @@ biased validate maps each capability to a dedicated validator:
 - Security -> validateSecurity()
 - Execution -> validateExecution()
 
-The CLI enforces presence checks for required artifacts, schema checks for Markdown and JSON structure, and threshold checks for assurance accuracy, security violations, execution error rate, and execution adoption.
+The CLI enforces presence checks for required artifacts, schema checks for Markdown and JSON structure, environment-specific threshold checks for assurance accuracy and failures, security violations, execution error rate, and execution adoption.
 
 ## 4. Example Output
 

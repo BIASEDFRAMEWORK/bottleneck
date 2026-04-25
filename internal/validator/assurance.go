@@ -5,30 +5,25 @@ import (
 	"os"
 	"path/filepath"
 
+	"biased/internal/config"
+	"biased/internal/metrics"
 	"biased/internal/models"
 )
 
 type AssuranceValidator struct {
 	rootPath string
+	config   config.AssuranceConfig
 }
 
-type assuranceFile struct {
-	ScenariosTotal  *int      `json:"scenarios_total"`
-	ScenariosPassed *int      `json:"scenarios_passed"`
-	ScenariosFailed *int      `json:"scenarios_failed"`
-	Accuracy        *float64  `json:"accuracy"`
-	Failures        *[]string `json:"failures"`
-}
-
-func NewAssuranceValidator(rootPath string) *AssuranceValidator {
-	return &AssuranceValidator{rootPath: rootPath}
+func NewAssuranceValidator(rootPath string, cfg config.AssuranceConfig) *AssuranceValidator {
+	return &AssuranceValidator{rootPath: rootPath, config: cfg}
 }
 
 func (v *AssuranceValidator) Validate() []models.ValidationResult {
-	return []models.ValidationResult{validateAssurance(v.rootPath)}
+	return []models.ValidationResult{validateAssurance(v.rootPath, v.config)}
 }
 
-func validateAssurance(rootPath string) models.ValidationResult {
+func validateAssurance(rootPath string, cfg config.AssuranceConfig) models.ValidationResult {
 	path := filepath.Join(rootPath, "assurance", "results.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -39,8 +34,8 @@ func validateAssurance(rootPath string) models.ValidationResult {
 		}
 	}
 
-	var data assuranceFile
-	if err := json.Unmarshal(content, &data); err != nil {
+	var results metrics.AssuranceResults
+	if err := json.Unmarshal(content, &results); err != nil {
 		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
@@ -48,36 +43,41 @@ func validateAssurance(rootPath string) models.ValidationResult {
 		}
 	}
 
-	if data.ScenariosTotal == nil ||
-		data.ScenariosPassed == nil ||
-		data.ScenariosFailed == nil ||
-		data.Accuracy == nil ||
-		data.Failures == nil {
+	calculated, err := metrics.CalculateAssuranceMetrics(results)
+	if err != nil {
 		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
-			Message:    "required fields missing",
+			Message:    err.Error(),
 		}
 	}
 
-	if *data.ScenariosFailed > 0 {
+	details := []string{
+		formatFloatDetail("accuracy", calculated.Accuracy, cfg.MinAccuracy, "threshold"),
+		formatIntDetail("scenarios_failed", calculated.ScenariosFailed, cfg.MaxFailures, "allowed"),
+	}
+
+	if calculated.ScenariosFailed > cfg.MaxFailures {
 		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
-			Message:    "scenarios_failed > 0",
+			Message:    "scenarios_failed above threshold",
+			Details:    details,
 		}
 	}
 
-	if *data.Accuracy < 0.90 {
+	if calculated.Accuracy < cfg.MinAccuracy {
 		return models.ValidationResult{
 			Capability: "Assurance",
 			Status:     models.StatusFail,
 			Message:    "accuracy below threshold",
+			Details:    details,
 		}
 	}
 
 	return models.ValidationResult{
 		Capability: "Assurance",
 		Status:     models.StatusPass,
+		Details:    details,
 	}
 }

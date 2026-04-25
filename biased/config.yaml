@@ -1,0 +1,25 @@
+environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+
+    execution:
+      max_error_rate: 0.05
+      min_adoption: 0.5
+
+  dev:
+    assurance:
+      min_accuracy: 0.85
+
+  test:
+    assurance:
+      min_accuracy: 0.90
+
+  stage:
+    assurance:
+      min_accuracy: 0.93
+
+  production:
+    assurance:
+      min_accuracy: 0.95

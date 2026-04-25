@@ -35,14 +35,13 @@ Required structure:
 
 Artifact: /biased/assurance/results.json
 
-Required JSON structure:
+Required JSON structure. Developers produce only this file; BIASED computes metrics from it:
 
 ~~~json
 {
   "scenarios_total": 1,
   "scenarios_passed": 1,
   "scenarios_failed": 0,
-  "accuracy": 1.0,
   "failures": []
 }
 ~~~
@@ -80,15 +79,19 @@ Intent passes only when intent.md exists and includes Outcomes, Constraints, and
 
 Design passes only when architecture.md exists, is not empty, and includes at least one Markdown section header.
 
-Assurance passes only when results.json exists, parses as JSON, includes all required fields, has zero failed scenarios, and has accuracy greater than or equal to 0.90.
+Assurance passes only when results.json exists, parses as JSON, includes all required fields, has failed scenarios at or below the configured max_failures threshold, and has calculated accuracy greater than or equal to the configured min_accuracy threshold.
 
 Security passes only when guardrails.json exists, parses as JSON, includes violations, and violations equals 0.
 
-Execution passes when telemetry.json exists, parses as JSON, includes adoption_rate and error_rate, and error_rate is less than or equal to 0.05. Execution returns WARNING when adoption_rate is below 0.5.
+Execution passes when telemetry.json exists, parses as JSON, includes adoption_rate and error_rate, and error_rate is less than or equal to the configured max_error_rate threshold. Execution returns WARNING when adoption_rate is below the configured min_adoption threshold.
 
 ## 3. CLI Mapping
 
-biased validate maps each capability to a dedicated validator:
+biased validate maps each capability to a dedicated validator. Use --env to select environment thresholds:
+
+~~~sh
+biased validate --env=production
+~~~
 
 - Behavior -> validateBehavior()
 - Intent -> validateIntent()
@@ -97,7 +100,7 @@ biased validate maps each capability to a dedicated validator:
 - Security -> validateSecurity()
 - Execution -> validateExecution()
 
-The CLI enforces presence checks for required artifacts, schema checks for Markdown and JSON structure, and threshold checks for assurance accuracy, security violations, execution error rate, and execution adoption.
+The CLI enforces presence checks for required artifacts, schema checks for Markdown and JSON structure, environment-specific threshold checks for assurance accuracy and failures, security violations, execution error rate, and execution adoption.
 
 ## 4. Example Output
 

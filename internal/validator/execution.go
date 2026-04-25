@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"biased/internal/config"
 	"biased/internal/models"
 )
 
 type ExecutionValidator struct {
 	rootPath string
+	config   config.ExecutionConfig
 }
 
 type executionFile struct {
@@ -17,15 +19,15 @@ type executionFile struct {
 	ErrorRate    *float64 `json:"error_rate"`
 }
 
-func NewExecutionValidator(rootPath string) *ExecutionValidator {
-	return &ExecutionValidator{rootPath: rootPath}
+func NewExecutionValidator(rootPath string, cfg config.ExecutionConfig) *ExecutionValidator {
+	return &ExecutionValidator{rootPath: rootPath, config: cfg}
 }
 
 func (v *ExecutionValidator) Validate() []models.ValidationResult {
-	return []models.ValidationResult{validateExecution(v.rootPath)}
+	return []models.ValidationResult{validateExecution(v.rootPath, v.config)}
 }
 
-func validateExecution(rootPath string) models.ValidationResult {
+func validateExecution(rootPath string, cfg config.ExecutionConfig) models.ValidationResult {
 	path := filepath.Join(rootPath, "execution", "telemetry.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -45,7 +47,7 @@ func validateExecution(rootPath string) models.ValidationResult {
 		}
 	}
 
-	if *data.ErrorRate > 0.05 {
+	if *data.ErrorRate > cfg.MaxErrorRate {
 		return models.ValidationResult{
 			Capability: "Execution",
 			Status:     models.StatusFail,
@@ -53,7 +55,7 @@ func validateExecution(rootPath string) models.ValidationResult {
 		}
 	}
 
-	if *data.AdoptionRate < 0.5 {
+	if *data.AdoptionRate < cfg.MinAdoption {
 		return models.ValidationResult{
 			Capability: "Execution",
 			Status:     models.StatusWarning,

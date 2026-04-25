@@ -87,7 +87,6 @@ Defines how the system works (architecture, interactions, system composition).
 
 **Artifacts**
 `/biased/design/architecture.md`
-`/biased/design/interactions.md`
 
 **Owner**
 Engineering
@@ -102,23 +101,23 @@ Engineering
 ### A — Assurance (Validation)
 
 **Definition**
-Continuously proves system behavior matches intent.
+Continuously proves system behavior matches intent using externally executed BDD scenarios and a single results artifact.
 
 **Measurements**
-- Behavioral Accuracy (>95%)
+- Behavioral Accuracy (computed from `scenarios_passed / scenarios_total`)
 - Defect Escape Rate (<5%)
 - Edge Case Coverage (>90%)
 - Drift Detection (within threshold)
 
 **Artifacts**
-`/biased/assurance/test-cases.json`
+`/biased/assurance/features/*.feature`
 `/biased/assurance/results.json`
 
 **Owner**
 Engineering + QA
 
 **Triggers**
-- Failing tests
+- Failing BDD results
 - New edge cases
 - Production defects
 
@@ -135,9 +134,7 @@ Ensures system safety, compliance, and governance.
 - Audit Completeness (100%)
 
 **Artifacts**
-`/biased/security/policies.md`
 `/biased/security/guardrails.json`
-`/biased/security/audit-log.json`
 
 **Owner**
 Security + Engineering
@@ -163,8 +160,6 @@ Measures real-world performance and feeds results back into the system.
 
 **Artifacts**
 `/biased/execution/telemetry.json`
-`/biased/execution/adoption.json`
-`/biased/execution/incidents.md`
 
 **Owner**
 Operations + Product + Engineering
@@ -176,62 +171,117 @@ Operations + Product + Engineering
 
 ---
 
-## 5. Measurement Example
+## 5. Configuration Model
+
+BIASED resolves validation thresholds from a single configuration file:
+
+`/biased/config.yaml`
+
+The model is environment-aware:
+
+- `default` defines baseline thresholds
+- `dev`, `test`, `stage`, and `production` override only the values they need
+- Missing environment values inherit from `default`
+
+Example:
+
+```yaml
+environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+    execution:
+      max_error_rate: 0.05
+      min_adoption: 0.5
+  production:
+    assurance:
+      min_accuracy: 0.95
+```
+
+This keeps developer friction low:
+
+- Developers produce one assurance artifact: `/biased/assurance/results.json`
+- The system computes metrics from that file
+- The selected environment determines the thresholds that apply
+
+---
+
+## 6. Measurement Example
+
+Input artifact:
 
 ```json
 {
-  "behavior": 0.88,
-  "intent": 0.92,
-  "design": 0.85,
-  "assurance": 0.91,
-  "security": 0.97,
-  "execution": 0.76
+  "scenarios_total": 10,
+  "scenarios_passed": 9,
+  "scenarios_failed": 1,
+  "failures": [
+    "user cannot complete checkout"
+  ]
 }
 ```
 
-## 6. Validation Example
+Computed metrics:
+
+- `accuracy = scenarios_passed / scenarios_total`
+- `scenarios_failed = scenarios_failed`
+
+For `production`, the effective assurance threshold is currently:
+
+- `min_accuracy = 0.95`
+- `max_failures = 0`
+
+## 7. Validation Example
 
 A system FAILS if:
 
 - Missing `/biased/behavior/behavior-spec.md`
 - Missing `/biased/intent/intent.md`
-- Assurance accuracy < 0.90
-- Any required directory missing
+- Missing or invalid `/biased/config.yaml`
+- Assurance failed scenarios exceed the resolved `max_failures`
+- Assurance computed accuracy falls below the resolved `min_accuracy`
+- Execution `error_rate` exceeds the resolved `max_error_rate`
 
-Example CLI output:
+Example CLI output for `production`:
 
 ```text
-Behavior: FAIL (missing behavior-spec.md)
+Behavior: PASS
 Intent: PASS
 Design: PASS
-Assurance: FAIL (accuracy 0.82 < 0.90)
+Assurance: FAIL (accuracy below threshold)
+  accuracy: 0.90 (threshold: 0.95)
+  scenarios_failed: 0 (allowed: 0)
 Security: PASS
-Execution: WARNING (low adoption)
+Execution: PASS
 
 System Status: FAIL
 Primary Bottleneck: Assurance
+Environment: production
 ```
 
-## 7. Enforcement Model
+## 8. Enforcement Model
 
 BIASED is enforced through:
 
 - Git-based artifacts
-- CLI validation
+- Environment-aware CLI validation
+- Read-only interpretation commands (`biased explain`, `biased scorecard`)
 - CI/CD integration
+- External BDD runners writing `/biased/assurance/results.json`
+- Threshold inheritance from `default` to the selected environment
 
-## 8. Operating Model
+## 9. Operating Model
 
 Behavior -> Intent -> Design -> Assurance -> Security -> Execution -> Behavior
 
+`biased validate --env=<environment>` resolves configuration, computes metrics from artifacts, and determines whether the system remains valid.
+
+`biased explain` and `biased scorecard` do not change system state. They interpret the current validation state so teams can understand ownership, bottlenecks, and next actions without mutating artifacts.
+
 Execution reveals truth. Truth updates Behavior and Intent.
 
-## Final Statement
-
-BIASED does not define how teams work.
-It defines what the system must produce--and enforces it.
-
-## 8. Loops (Continuous System Validation)
+## 10. Loops (Continuous System Validation)
 
 ### Purpose
 
@@ -273,7 +323,7 @@ After deployment, the feature enters continuous loops:
 
 ---
 
-## 8.1 Assurance Loop (Primary Loop)
+## 10.1 Assurance Loop (Primary Loop)
 
 ### Definition
 
@@ -291,8 +341,9 @@ Execution → Assurance → Behavior/Design update → redeploy → repeat
 
 ### Validation
 
-- FAIL if any scenarios fail
-- FAIL if accuracy falls below threshold
+- FAIL if `scenarios_failed` exceeds the resolved `max_failures`
+- FAIL if computed accuracy falls below the resolved `min_accuracy`
+- Thresholds are resolved from `/biased/config.yaml` for the selected environment
 
 ### Principle
 
@@ -300,7 +351,7 @@ Execution → Assurance → Behavior/Design update → redeploy → repeat
 
 ---
 
-## 8.2 Execution Loop
+## 10.2 Execution Loop
 
 ### Definition
 
@@ -317,13 +368,18 @@ Execution → Metrics → Analysis → Behavior/Intent refinement → repeat
 - Error rate
 - Latency
 
+### Validation
+
+- FAIL if `error_rate` exceeds the resolved `max_error_rate`
+- WARNING if `adoption_rate` falls below the resolved `min_adoption`
+
 ### Principle
 
 > Execution reveals truth.
 
 ---
 
-## 8.3 Cost Loop
+## 10.3 Cost Loop
 
 ### Definition
 
@@ -350,17 +406,18 @@ Execution → Cost measurement → Design adjustment → Assurance → repeat
 
 ---
 
-## 8.4 Loop Enforcement
+## 10.4 Loop Enforcement
 
 Loops are enforced through:
 
 - Continuous validation (`biased validate`)
 - CI/CD integration
 - Execution telemetry
+- Environment-aware thresholds from `/biased/config.yaml`
 
 ---
 
-## 8.5 System Validity
+## 10.5 System Validity
 
 A system remains valid only if:
 
@@ -373,3 +430,8 @@ A system remains valid only if:
 
 > Shipping is not completion.  
 > Continuous validation is completion.
+
+## Final Statement
+
+BIASED does not define how teams work.
+It defines what the system must produce--and enforces it.

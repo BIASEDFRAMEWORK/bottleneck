@@ -46,6 +46,26 @@ Required JSON structure. Developers produce only this file; BIASED computes metr
 }
 ~~~
 
+### Configuration
+
+Artifact: /biased/config.yaml
+
+Required YAML structure:
+
+~~~yaml
+environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+    execution:
+      max_error_rate: 0.05
+      min_adoption: 0.5
+  production:
+    assurance:
+      min_accuracy: 0.95
+~~~
+
 ### Security
 
 Artifact: /biased/security/guardrails.json
@@ -81,13 +101,15 @@ Design passes only when architecture.md exists, is not empty, and includes at le
 
 Assurance passes only when results.json exists, parses as JSON, includes all required fields, has failed scenarios at or below the configured max_failures threshold, and has calculated accuracy greater than or equal to the configured min_accuracy threshold.
 
+config.yaml must exist and parse as valid YAML before capability validation begins. When an environment is selected, unspecified values inherit from default.
+
 Security passes only when guardrails.json exists, parses as JSON, includes violations, and violations equals 0.
 
 Execution passes when telemetry.json exists, parses as JSON, includes adoption_rate and error_rate, and error_rate is less than or equal to the configured max_error_rate threshold. Execution returns WARNING when adoption_rate is below the configured min_adoption threshold.
 
 ## 3. CLI Mapping
 
-biased validate maps each capability to a dedicated validator. Use --env to select environment thresholds:
+biased validate loads config.yaml first, resolves inherited thresholds, and then maps each capability to a dedicated validator. Use --env to select environment thresholds:
 
 ~~~sh
 biased validate --env=production
@@ -100,7 +122,14 @@ biased validate --env=production
 - Security -> validateSecurity()
 - Execution -> validateExecution()
 
-The CLI enforces presence checks for required artifacts, schema checks for Markdown and JSON structure, environment-specific threshold checks for assurance accuracy and failures, security violations, execution error rate, and execution adoption.
+The CLI enforces presence checks for required artifacts, schema checks for Markdown and JSON/YAML structure, environment-specific threshold checks for assurance accuracy and failures, security violations, execution error rate, and execution adoption.
+
+Related read-only commands built on the same validation results:
+
+- `biased explain`
+  Produces a human-readable explanation with owner mapping, bottleneck mapping, evidence, and recommended next actions.
+- `biased scorecard`
+  Produces a compact text or JSON scorecard summarizing capability status, owner, bottleneck, and evidence.
 
 ## 4. Example Output
 
@@ -108,10 +137,32 @@ The CLI enforces presence checks for required artifacts, schema checks for Markd
 Behavior: PASS
 Intent: PASS
 Design: PASS
-Assurance: FAIL (scenarios_failed > 0)
+Assurance: FAIL (accuracy below threshold)
+  accuracy: 0.90 (threshold: 0.95)
+  scenarios_failed: 0 (allowed: 0)
 Security: PASS
-Execution: WARNING (low adoption)
+Execution: PASS
 
 System Status: FAIL
 Primary Bottleneck: Assurance
+Environment: production
 ~~~
+
+## 5. Interpretation Commands
+
+### Explain
+
+~~~sh
+biased explain --env=production --capability=Assurance
+~~~
+
+Use `explain` when an operator needs remediation context for one or more capabilities.
+
+### Scorecard
+
+~~~sh
+biased scorecard --env=production
+biased scorecard --env=production --format=json
+~~~
+
+Use `scorecard` when an operator needs a concise summary for terminal review or downstream automation.

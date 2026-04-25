@@ -42,6 +42,7 @@ This creates:
 
 ```text
 biased/
+  config.yaml
   behavior/
   intent/
   design/
@@ -146,6 +147,14 @@ go run . validate --env=production
 
 Environment-specific values inherit missing thresholds from `default`.
 
+Current built-in environments:
+
+- `default`
+- `dev`
+- `test`
+- `stage`
+- `production`
+
 ### Security
 
 Edit:
@@ -187,6 +196,12 @@ Run:
 go run . validate
 ```
 
+Or validate against a stricter environment:
+
+```sh
+go run . validate --env=production
+```
+
 Passing output:
 
 ```text
@@ -194,6 +209,8 @@ Behavior: PASS
 Intent: PASS
 Design: PASS
 Assurance: PASS
+  accuracy: 1.00 (threshold: 0.90)
+  scenarios_failed: 0 (allowed: 0)
 Security: PASS
 Execution: PASS
 
@@ -208,9 +225,11 @@ Failing output example:
 Behavior: PASS
 Intent: PASS
 Design: PASS
-Assurance: FAIL (scenarios_failed > 0)
+Assurance: FAIL (accuracy below threshold)
+  accuracy: 0.90 (threshold: 0.95)
+  scenarios_failed: 0 (allowed: 0)
 Security: PASS
-Execution: WARNING (low adoption)
+Execution: PASS
 
 System Status: FAIL
 Primary Bottleneck: Assurance
@@ -237,6 +256,50 @@ or:
 System incomplete
 ```
 
+## 6. Explain The Current State
+
+Run:
+
+```sh
+go run . explain
+```
+
+Or focus on one capability:
+
+```sh
+go run . explain --env=production --capability=Assurance
+```
+
+Use `explain` when you want:
+
+- ownership
+- mapped bottlenecks
+- evidence from validation
+- recommended next actions
+
+## 7. Generate A Scorecard
+
+Run:
+
+```sh
+go run . scorecard
+```
+
+For machine-readable output:
+
+```sh
+go run . scorecard --env=production --format=json
+```
+
+Use `scorecard` when you want a compact summary of:
+
+- environment
+- system status
+- primary bottleneck
+- owner per capability
+- bottleneck per capability
+- evidence per capability
+
 ## Recommended Workflow
 
 1. Run `biased init`.
@@ -244,9 +307,11 @@ System incomplete
 3. Write BDD scenarios under `biased/assurance/features/`.
 4. Run your external BDD framework.
 5. Export BDD results to `biased/assurance/results.json`.
-6. Update security and execution artifacts.
-7. Run `biased validate`.
-8. Fix the primary bottleneck if the system fails.
+6. Select the target environment in `biased/config.yaml` or with `--env`.
+7. Update security and execution artifacts.
+8. Run `biased validate`.
+9. Run `biased explain` or `biased scorecard` to understand ownership and bottlenecks.
+10. Fix the primary bottleneck if the system fails.
 
 ## Principle
 

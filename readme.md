@@ -39,6 +39,7 @@ Creates the local BIASED artifact structure:
 
 ```text
 biased/
+  config.yaml
   behavior/behavior-spec.md
   intent/intent.md
   design/architecture.md
@@ -68,6 +69,8 @@ Behavior: PASS
 Intent: PASS
 Design: PASS
 Assurance: PASS
+  accuracy: 1.00 (threshold: 0.90)
+  scenarios_failed: 0 (allowed: 0)
 Security: PASS
 Execution: PASS
 
@@ -96,6 +99,44 @@ or:
 ```text
 System incomplete
 ```
+
+### `biased explain`
+
+Explains the current validation state in a human-readable narrative without changing any files.
+
+Examples:
+
+```sh
+biased explain
+biased explain --env=production
+biased explain --env=production --capability=Assurance
+```
+
+The command reuses the validation engine and adds:
+
+- owner mapping
+- mapped bottlenecks
+- evidence/details
+- recommended next actions
+
+### `biased scorecard`
+
+Summarizes the current validation state in a compact scorecard.
+
+Examples:
+
+```sh
+biased scorecard
+biased scorecard --env=production
+biased scorecard --format=json
+```
+
+Supported formats:
+
+- `text`
+- `json`
+
+Like `validate`, `scorecard` returns a non-zero exit code when the system is failing.
 
 ## Validation Rules
 
@@ -141,7 +182,7 @@ Required schema:
 }
 ```
 
-BIASED computes `accuracy` as `scenarios_passed / scenarios_total`. Fails when JSON is invalid, required fields are missing, `scenarios_failed` exceeds the configured `max_failures`, or calculated accuracy is below the configured `min_accuracy`.
+BIASED computes `accuracy` as `scenarios_passed / scenarios_total`. Developers maintain only this file. The CLI interprets it against the selected environment. Assurance fails when JSON is invalid, required fields are missing, `scenarios_failed` exceeds the configured `max_failures`, or calculated accuracy is below the configured `min_accuracy`.
 
 ### Configuration
 
@@ -162,6 +203,8 @@ environments:
     assurance:
       min_accuracy: 0.95
 ```
+
+`biased validate --env=<environment>` starts from `default` and overlays only the explicitly configured values for the selected environment.
 
 ### Security
 
@@ -217,6 +260,9 @@ Run locally:
 ```sh
 go run . init
 go run . validate
+go run . validate --env=production
+go run . explain
+go run . scorecard
 go run . status
 ```
 

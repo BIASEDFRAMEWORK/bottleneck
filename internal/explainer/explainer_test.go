@@ -90,8 +90,8 @@ func TestRenderIncludesSummaryEvidenceAndActions(t *testing.T) {
 		"Evidence:",
 		"accuracy below threshold",
 		"accuracy: 0.90 (threshold: 0.95)",
-		"Recommended Next Actions:",
-		"Inspect bottleneck/assurance/results.json and confirm the scenario counts are correct.",
+		"Recommended Next Action:",
+		"Fix failing tests or add passing assurance evidence until accuracy meets the selected threshold.",
 	}
 
 	for _, expected := range expectedSubstrings {
@@ -127,12 +127,69 @@ func TestRenderSurfacesContentQualityWarningDetails(t *testing.T) {
 		"Status: WARNING",
 		"content quality warnings detected",
 		`bottleneck/behavior/behavior-spec.md section "Expected Behavior" still contains placeholder content`,
-		"Treat this warning as an early signal and correct it before it becomes a failing bottleneck.",
+		"Replace placeholder behavior text with concrete expected and unacceptable behavior.",
 	}
 
 	for _, expected := range expectedSubstrings {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("expected %q in output:\n%s", expected, output)
 		}
+	}
+}
+
+func TestRenderIncludesPrimaryDiagnosisWhenNoCapabilityFilter(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "production",
+		SystemStatus:      models.StatusFail,
+		PrimaryBottleneck: "Assurance",
+		Results: []models.ValidationResult{
+			{Capability: "Behavior", Status: models.StatusPass},
+			{Capability: "Intent", Status: models.StatusPass},
+			{Capability: "Design", Status: models.StatusPass},
+			{Capability: "Assurance", Status: models.StatusFail, Message: "missing results.json"},
+			{Capability: "Security", Status: models.StatusPass},
+			{Capability: "Execution", Status: models.StatusPass},
+		},
+	}
+
+	output, err := Render(result, "")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expected := []string{
+		"Primary Diagnosis:",
+		"Weakest Category: Assurance",
+		"Why: There is not enough proof that the expected behavior was tested.",
+		"Next Action: Add assurance evidence that maps test or evaluation results to BEHAVIOR-001.",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+}
+
+func TestRenderCapabilityFilterPreservesCapabilitySpecificOutput(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "production",
+		SystemStatus:      models.StatusFail,
+		PrimaryBottleneck: "Assurance",
+		Results: []models.ValidationResult{
+			{Capability: "Behavior", Status: models.StatusPass},
+			{Capability: "Assurance", Status: models.StatusFail, Message: "missing results.json"},
+		},
+	}
+
+	output, err := Render(result, "Behavior")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	if strings.Contains(output, "Primary Diagnosis:") {
+		t.Fatalf("did not expect global diagnosis for filtered output:\n%s", output)
+	}
+	if !strings.Contains(output, "Capability: Behavior") {
+		t.Fatalf("expected behavior capability output:\n%s", output)
 	}
 }

@@ -34,6 +34,9 @@ func TestBuildMapsAssuranceFailure(t *testing.T) {
 	if capability.Bottleneck != "Validation gaps" {
 		t.Fatalf("expected bottleneck mapping, got %q", capability.Bottleneck)
 	}
+	if card.Diagnosis.PrimaryBottleneck != "Assurance" {
+		t.Fatalf("expected diagnosis primary bottleneck Assurance, got %q", card.Diagnosis.PrimaryBottleneck)
+	}
 }
 
 func TestRenderTextIncludesSummaryAndRowData(t *testing.T) {
@@ -63,6 +66,9 @@ func TestRenderTextIncludesSummaryAndRowData(t *testing.T) {
 		"Environment: production",
 		"System Status: FAIL",
 		"Primary Bottleneck: Assurance",
+		"Diagnosis:",
+		"Why:",
+		"Next Action: Fix failing tests or add passing assurance evidence until accuracy meets the selected threshold.",
 		"Assurance",
 		"Assurance Engineer",
 		"Validation gaps",
@@ -118,6 +124,9 @@ func TestRenderJSONProducesValidJSON(t *testing.T) {
 	if decoded.ReleaseRecommendation != RecommendationProceed {
 		t.Fatalf("expected release recommendation Proceed, got %q", decoded.ReleaseRecommendation)
 	}
+	if decoded.Diagnosis.PrimaryBottleneck != "None" {
+		t.Fatalf("expected healthy diagnosis in json, got %q", decoded.Diagnosis.PrimaryBottleneck)
+	}
 	if decoded.EffectiveThresholds.Assurance.MinAccuracy != 0.95 {
 		t.Fatalf("expected min accuracy threshold in json, got %.2f", decoded.EffectiveThresholds.Assurance.MinAccuracy)
 	}
@@ -132,6 +141,9 @@ func TestRenderJSONProducesValidJSON(t *testing.T) {
 	}
 	if decoded.Capabilities[0].EvidenceCount != 1 {
 		t.Fatalf("expected evidence count 1, got %d", decoded.Capabilities[0].EvidenceCount)
+	}
+	if decoded.Capabilities[0].Score < 80 {
+		t.Fatalf("expected healthy capability score, got %d", decoded.Capabilities[0].Score)
 	}
 }
 
@@ -177,6 +189,62 @@ func TestRenderSurfacesContentQualityDetailsInTextAndJSON(t *testing.T) {
 	}
 	if !containsString(decoded.Capabilities[0].MissingEvidence, `bottleneck/intent/intent.md section "Outcomes" needs real evidence`) {
 		t.Fatalf("expected content quality detail in json missing evidence, got %#v", decoded.Capabilities[0].MissingEvidence)
+	}
+}
+
+func TestScorecardDiagnosisSelectsMissingAssuranceEvidence(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "production",
+		SystemStatus:      models.StatusFail,
+		PrimaryBottleneck: "Assurance",
+		Results: []models.ValidationResult{
+			{Capability: "Behavior", Status: models.StatusPass, Details: []string{"behavior evidence"}},
+			{Capability: "Intent", Status: models.StatusPass, Details: []string{"intent evidence"}},
+			{Capability: "Design", Status: models.StatusPass, Details: []string{"design evidence"}},
+			{Capability: "Assurance", Status: models.StatusFail, Message: "missing results.json"},
+			{Capability: "Security", Status: models.StatusPass, Details: []string{"violations: 0"}},
+			{Capability: "Execution", Status: models.StatusPass, Details: []string{"error_rate: 0.01"}},
+		},
+	}
+
+	card := Build(result)
+
+	if card.Diagnosis.PrimaryBottleneck != "Assurance" {
+		t.Fatalf("expected Assurance diagnosis, got %q", card.Diagnosis.PrimaryBottleneck)
+	}
+	if !strings.Contains(card.Diagnosis.WhyItMatters, "proof that the expected behavior was tested") {
+		t.Fatalf("expected assurance why text, got %q", card.Diagnosis.WhyItMatters)
+	}
+	if card.Diagnosis.RecommendedAction != "Add assurance evidence that maps test or evaluation results to BEHAVIOR-001." {
+		t.Fatalf("unexpected recommended action %q", card.Diagnosis.RecommendedAction)
+	}
+	if score := diagnosisScoreFor(card, "Assurance"); score >= diagnosisScoreFor(card, "Security") {
+		t.Fatalf("expected Assurance score below Security, got Assurance=%d Security=%d", score, diagnosisScoreFor(card, "Security"))
+	}
+}
+
+func TestScorecardDiagnosisHandlesTiesDeterministically(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "production",
+		SystemStatus:      models.StatusFail,
+		PrimaryBottleneck: "Security",
+		Results: []models.ValidationResult{
+			{Capability: "Behavior", Status: models.StatusPass},
+			{Capability: "Intent", Status: models.StatusPass},
+			{Capability: "Design", Status: models.StatusPass},
+			{Capability: "Assurance", Status: models.StatusFail, Message: "missing results.json"},
+			{Capability: "Security", Status: models.StatusFail, Message: "missing guardrails.json"},
+			{Capability: "Execution", Status: models.StatusPass},
+		},
+	}
+
+	card := Build(result)
+
+	if card.Diagnosis.PrimaryBottleneck != "Assurance" {
+		t.Fatalf("expected Assurance to win tie, got %q", card.Diagnosis.PrimaryBottleneck)
+	}
+	if got := strings.Join(card.Diagnosis.TiedBottlenecks, ","); got != "Assurance,Security" {
+		t.Fatalf("expected deterministic tied bottlenecks, got %q", got)
 	}
 }
 
@@ -296,8 +364,9 @@ func TestRenderMarkdownProducesGitHubReadableTable(t *testing.T) {
 	expected := []string{
 		"# bottleneck Scorecard",
 		"| Field | Value |",
-		"| Capability | Status | Evidence | Missing Evidence | Recommendation |",
-		"| Behavior | WARN | 1 |",
+		"## Diagnosis",
+		"| Capability | Status | Score | Evidence | Missing Evidence | Recommendation |",
+		"| Behavior | WARN | 50 | 1 |",
 	}
 
 	for _, substring := range expected {
@@ -355,6 +424,9 @@ func TestRenderJSONIncludesGitHubMetadataWhenDetected(t *testing.T) {
 	}
 	if !containsRiskSignal(decoded.PullRequestRisk, "source_without_evidence_artifacts") {
 		t.Fatalf("expected source without artifact risk signal, got %#v", decoded.PullRequestRisk)
+	}
+	if decoded.Diagnosis.PrimaryBottleneck != "Behavior" {
+		t.Fatalf("expected diagnosis primary bottleneck Behavior, got %q", decoded.Diagnosis.PrimaryBottleneck)
 	}
 }
 
@@ -542,4 +614,13 @@ func containsRiskSignal(values []prrisk.Signal, expected string) bool {
 		}
 	}
 	return false
+}
+
+func diagnosisScoreFor(card Scorecard, category string) int {
+	for _, score := range card.Diagnosis.CategoryScores {
+		if score.Category == category {
+			return score.Score
+		}
+	}
+	return 0
 }

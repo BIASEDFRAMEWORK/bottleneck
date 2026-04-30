@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"strings"
 
+	"bottleneck/internal/diagnosis"
 	"bottleneck/internal/githubactions"
 	"bottleneck/internal/models"
 	"bottleneck/internal/prrisk"
 )
 
 const (
-	SchemaVersion = "scorecard.v1"
+	SchemaVersion = "scorecard.v2"
 
 	FormatText     = "text"
 	FormatJSON     = "json"
@@ -39,6 +40,7 @@ type Scorecard struct {
 	ReleaseRecommendation string                     `json:"release_recommendation"`
 	PrimaryBottleneck     string                     `json:"primary_bottleneck"`
 	EffectiveThresholds   models.EffectiveThresholds `json:"effective_thresholds"`
+	Diagnosis             diagnosis.Diagnosis        `json:"diagnosis"`
 	GitHub                *githubactions.Metadata    `json:"github,omitempty"`
 	PullRequestRisk       []prrisk.Signal            `json:"pull_request_risk,omitempty"`
 	Capabilities          []CapabilityScorecard      `json:"capabilities"`
@@ -48,6 +50,7 @@ type Scorecard struct {
 type CapabilityScorecard struct {
 	Capability        string   `json:"capability"`
 	Status            string   `json:"status"`
+	Score             int      `json:"score"`
 	Owner             string   `json:"owner"`
 	Bottleneck        string   `json:"bottleneck"`
 	EvidenceCount     int      `json:"evidence_count"`
@@ -143,17 +146,23 @@ func Build(result models.EngineResult) Scorecard {
 }
 
 func BuildWithOptions(result models.EngineResult, options Options) Scorecard {
+	diagnosisResult := diagnosis.Analyze(result)
 	capabilities := make([]CapabilityScorecard, 0, len(result.Results))
 	for _, validation := range result.Results {
-		capabilities = append(capabilities, buildCapability(validation))
+		score := diagnosis.ScoreFor(validation.Capability, diagnosisResult.CategoryScores)
+		if !diagnosis.HasCategoryScore(validation.Capability, diagnosisResult.CategoryScores) {
+			score = diagnosis.ScoreValidation(validation)
+		}
+		capabilities = append(capabilities, buildCapability(validation, score))
 	}
 
 	card := Scorecard{
 		SchemaVersion:         SchemaVersion,
 		Environment:           result.Environment,
 		SystemStatus:          displayStatus(result.SystemStatus),
-		PrimaryBottleneck:     primaryBottleneck(result.PrimaryBottleneck),
+		PrimaryBottleneck:     diagnosisResult.PrimaryBottleneck,
 		EffectiveThresholds:   result.EffectiveThresholds,
+		Diagnosis:             diagnosisResult,
 		Capabilities:          capabilities,
 		ReleaseRecommendation: releaseRecommendationFor(capabilities, displayStatus(result.SystemStatus)),
 	}
@@ -196,7 +205,7 @@ func RenderWithOptions(result models.EngineResult, format string, options Option
 	}
 }
 
-func buildCapability(validation models.ValidationResult) CapabilityScorecard {
+func buildCapability(validation models.ValidationResult, score int) CapabilityScorecard {
 	meta := metadataFor(validation.Capability)
 	evidence := evidenceItems(validation)
 	missingEvidence := missingEvidenceFor(validation, evidence, meta)
@@ -204,6 +213,7 @@ func buildCapability(validation models.ValidationResult) CapabilityScorecard {
 	return CapabilityScorecard{
 		Capability:        validation.Capability,
 		Status:            displayStatus(validation.Status),
+		Score:             score,
 		Owner:             meta.owner,
 		Bottleneck:        meta.bottleneck,
 		EvidenceCount:     len(evidence),
@@ -228,18 +238,20 @@ func renderText(card Scorecard, view string) string {
 func renderEngineeringText(card Scorecard) string {
 	var lines []string
 	lines = append(lines, scorecardHeader(card)...)
+	lines = appendDiagnosisText(lines, card)
 	lines = appendGitHubText(lines, card)
 	lines = append(lines, "", "Effective Thresholds:")
 	lines = append(lines, thresholdLines(card.EffectiveThresholds, "  ")...)
 	lines = append(lines, "", "Capabilities:")
-	lines = append(lines, fmt.Sprintf("%-12s %-8s %-8s %-24s %s", "Capability", "Status", "Evidence", "Owner", "Reason"))
-	lines = append(lines, fmt.Sprintf("%-12s %-8s %-8s %-24s %s", "----------", "------", "--------", "-----", "------"))
+	lines = append(lines, fmt.Sprintf("%-12s %-8s %-6s %-8s %-24s %s", "Capability", "Status", "Score", "Evidence", "Owner", "Reason"))
+	lines = append(lines, fmt.Sprintf("%-12s %-8s %-6s %-8s %-24s %s", "----------", "------", "-----", "--------", "-----", "------"))
 
 	for _, capability := range card.Capabilities {
 		lines = append(lines, fmt.Sprintf(
-			"%-12s %-8s %-8d %-24s %s",
+			"%-12s %-8s %-6d %-8d %-24s %s",
 			capability.Capability,
 			capability.Status,
+			capability.Score,
 			capability.EvidenceCount,
 			capability.Owner,
 			capability.Reason,
@@ -252,6 +264,7 @@ func renderEngineeringText(card Scorecard) string {
 		lines = append(lines,
 			fmt.Sprintf("%s:", capability.Capability),
 			fmt.Sprintf("  Status: %s", capability.Status),
+			fmt.Sprintf("  Score: %d", capability.Score),
 			fmt.Sprintf("  Owner: %s", capability.Owner),
 			fmt.Sprintf("  Bottleneck: %s", capability.Bottleneck),
 			fmt.Sprintf("  Reason: %s", capability.Reason),
@@ -277,6 +290,7 @@ func renderExecutiveText(card Scorecard) string {
 		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
 		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
 	)
+	lines = appendDiagnosisText(lines, card)
 	lines = appendGitHubText(lines, card)
 	lines = append(lines, "", "Capability Status Summary:")
 
@@ -303,6 +317,7 @@ func renderGovernanceText(card Scorecard) string {
 		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
 		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
 	)
+	lines = appendDiagnosisText(lines, card)
 	lines = appendGitHubText(lines, card)
 	lines = append(lines, "", "Effective Thresholds:")
 	lines = append(lines, thresholdLines(card.EffectiveThresholds, "  ")...)
@@ -347,17 +362,19 @@ func renderMarkdown(card Scorecard, view string) string {
 func renderEngineeringMarkdown(card Scorecard) string {
 	var lines []string
 	lines = append(lines, markdownSummary(card)...)
+	lines = appendDiagnosisMarkdown(lines, card)
 	lines = appendGitHubMarkdown(lines, card)
 	lines = append(lines, "", "## Effective Thresholds", "", "| Threshold | Value |", "| --- | ---: |")
 	for _, threshold := range thresholdRows(card.EffectiveThresholds) {
 		lines = append(lines, fmt.Sprintf("| %s | %s |", threshold.name, threshold.value))
 	}
-	lines = append(lines, "", "## Capabilities", "", "| Capability | Status | Evidence | Missing Evidence | Recommendation |", "| --- | --- | ---: | --- | --- |")
+	lines = append(lines, "", "## Capabilities", "", "| Capability | Status | Score | Evidence | Missing Evidence | Recommendation |", "| --- | --- | ---: | ---: | --- | --- |")
 	for _, capability := range card.Capabilities {
 		lines = append(lines, fmt.Sprintf(
-			"| %s | %s | %d | %s | %s |",
+			"| %s | %s | %d | %d | %s | %s |",
 			markdownCell(capability.Capability),
 			markdownCell(capability.Status),
+			capability.Score,
 			capability.EvidenceCount,
 			markdownCell(joinMarkdownList(capability.MissingEvidence, "None")),
 			markdownCell(capability.RecommendedAction),
@@ -386,6 +403,7 @@ func renderExecutiveMarkdown(card Scorecard) string {
 		fmt.Sprintf("| Release Recommendation | %s |", markdownCell(card.ReleaseRecommendation)),
 		fmt.Sprintf("| Primary Bottleneck | %s |", markdownCell(card.PrimaryBottleneck)),
 	)
+	lines = appendDiagnosisMarkdown(lines, card)
 	lines = appendGitHubMarkdown(lines, card)
 	lines = append(lines, "", "## Capability Status Summary", "", "| Status | Count |", "| --- | ---: |")
 	for _, line := range statusSummaryRows(card) {
@@ -398,6 +416,7 @@ func renderExecutiveMarkdown(card Scorecard) string {
 func renderGovernanceMarkdown(card Scorecard) string {
 	var lines []string
 	lines = append(lines, markdownSummary(card)...)
+	lines = appendDiagnosisMarkdown(lines, card)
 	lines = appendGitHubMarkdown(lines, card)
 	lines = append(lines, "", "## Effective Thresholds", "", "| Threshold | Value |", "| --- | ---: |")
 	for _, threshold := range thresholdRows(card.EffectiveThresholds) {
@@ -441,6 +460,51 @@ func scorecardHeader(card Scorecard) []string {
 		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
 		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
 	}
+}
+
+func appendDiagnosisText(lines []string, card Scorecard) []string {
+	lines = append(lines,
+		"",
+		"Diagnosis:",
+		fmt.Sprintf("  Primary Bottleneck: %s", card.Diagnosis.PrimaryBottleneck),
+		fmt.Sprintf("  Why: %s", card.Diagnosis.WhyItMatters),
+		fmt.Sprintf("  Next Action: %s", card.Diagnosis.RecommendedAction),
+	)
+	if len(card.Diagnosis.TiedBottlenecks) > 0 {
+		lines = append(lines, fmt.Sprintf("  Tied Bottlenecks: %s", strings.Join(card.Diagnosis.TiedBottlenecks, ", ")))
+	}
+	lines = append(lines, "  Category Scores:")
+	for _, score := range card.Diagnosis.CategoryScores {
+		lines = append(lines, fmt.Sprintf("    - %s: %d (%s)", score.Category, score.Score, displayStatus(score.Status)))
+	}
+	if len(card.Diagnosis.CategoryScores) == 0 {
+		lines = append(lines, "    - None.")
+	}
+	return lines
+}
+
+func appendDiagnosisMarkdown(lines []string, card Scorecard) []string {
+	lines = append(lines,
+		"",
+		"## Diagnosis",
+		"",
+		fmt.Sprintf("- **Primary Bottleneck:** %s", markdownText(card.Diagnosis.PrimaryBottleneck)),
+		fmt.Sprintf("- **Why:** %s", markdownText(card.Diagnosis.WhyItMatters)),
+		fmt.Sprintf("- **Next action:** %s", markdownText(card.Diagnosis.RecommendedAction)),
+	)
+	if len(card.Diagnosis.TiedBottlenecks) > 0 {
+		lines = append(lines, fmt.Sprintf("- **Tied bottlenecks:** %s", markdownText(strings.Join(card.Diagnosis.TiedBottlenecks, ", "))))
+	}
+	lines = append(lines, "", "| Category | Score | Status |", "| --- | ---: | --- |")
+	for _, score := range card.Diagnosis.CategoryScores {
+		lines = append(lines, fmt.Sprintf(
+			"| %s | %d | %s |",
+			markdownCell(score.Category),
+			score.Score,
+			markdownCell(displayStatus(score.Status)),
+		))
+	}
+	return lines
 }
 
 func appendGitHubText(lines []string, card Scorecard) []string {
@@ -657,7 +721,7 @@ func recommendedActionFor(validation models.ValidationResult, meta capabilityMet
 	case StatusUnknown:
 		return "Run validation before using this scorecard for release decisions."
 	default:
-		return meta.recommendedAction
+		return diagnosis.RecommendedAction(validation)
 	}
 }
 
@@ -740,13 +804,6 @@ func metadataFor(capability string) capabilityMetadata {
 		recommendedAction: "Inspect the underlying artifact and validation output for this capability.",
 		passAction:        "Keep the artifact and observed evidence current.",
 	}
-}
-
-func primaryBottleneck(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "None"
-	}
-	return value
 }
 
 func normalizeView(viewValues ...string) (string, error) {

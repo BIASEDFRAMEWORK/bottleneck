@@ -162,7 +162,7 @@ Environment: production
 bottleneck explain --env=production --capability=Assurance
 ~~~
 
-Use `explain` when an operator needs remediation context for one or more capabilities.
+Use `explain` when an operator needs remediation context for one or more capabilities. When no capability filter is provided, the output starts with the primary diagnosis: weakest category, why it matters, and one recommended next action.
 
 ### Scorecard
 
@@ -176,7 +176,9 @@ bottleneck scorecard --env=production --view=governance
 bottleneck scorecard --env=production --view=governance --format=markdown
 ~~~
 
-Use `scorecard` when an operator needs release-readiness context for terminal review, GitHub summaries, release notes, governance review, or downstream automation. The scorecard includes a release recommendation of `Proceed`, `Conditional`, `Block`, or `Unknown`, and displays the effective assurance and execution thresholds resolved for the selected environment.
+Use `scorecard` when an operator needs release-readiness context for terminal review, GitHub summaries, release notes, governance review, or downstream automation. The scorecard includes a release recommendation of `Proceed`, `Conditional`, `Block`, or `Unknown`, deterministic diagnosis, category scores, and the effective assurance and execution thresholds resolved for the selected environment.
+
+Diagnosis scoring is derived from validation output. `PASS` categories start high, `WARNING` categories score in the middle, and `FAIL` categories score low. Missing, placeholder, weak, stale, or disconnected evidence reduces the score further. The primary bottleneck is the weakest BIASED category, with ties resolved in this order: Assurance, Security, Behavior, Intent, Execution, Design. If all assessed BIASED categories are strong, the primary bottleneck is `None`.
 
 ### Trace
 

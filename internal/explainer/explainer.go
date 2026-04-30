@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"bottleneck/internal/diagnosis"
 	"bottleneck/internal/models"
 )
 
@@ -94,16 +95,32 @@ func Render(result models.EngineResult, capabilityFilter string) (string, error)
 	if err != nil {
 		return "", err
 	}
+	diagnosisResult := diagnosis.Analyze(result)
 
 	var lines []string
 	lines = append(lines,
 		fmt.Sprintf("Environment: %s", result.Environment),
 		fmt.Sprintf("System Status: %s", result.SystemStatus),
-		fmt.Sprintf("Primary Bottleneck: %s", result.PrimaryBottleneck),
+		fmt.Sprintf("Primary Bottleneck: %s", diagnosisResult.PrimaryBottleneck),
 	)
+	if capabilityFilter == "" {
+		lines = append(lines,
+			"",
+			"Primary Diagnosis:",
+			fmt.Sprintf("Weakest Category: %s", diagnosisResult.PrimaryBottleneck),
+			fmt.Sprintf("Why: %s", diagnosisResult.WhyItMatters),
+			fmt.Sprintf("Next Action: %s", diagnosisResult.RecommendedAction),
+		)
+		if len(diagnosisResult.TiedBottlenecks) > 0 {
+			lines = append(lines, fmt.Sprintf("Tied Bottlenecks: %s", strings.Join(diagnosisResult.TiedBottlenecks, ", ")))
+		}
+	}
 
 	for _, validation := range filtered {
 		meta := metadataFor(validation.Capability)
+		if info := diagnosis.Info(validation.Capability); info.WhyItMatters != "" {
+			meta.whyItMatters = info.WhyItMatters
+		}
 
 		lines = append(lines, "")
 		lines = append(lines,
@@ -120,7 +137,7 @@ func Render(result models.EngineResult, capabilityFilter string) (string, error)
 			lines = append(lines, fmt.Sprintf("- %s", item))
 		}
 
-		lines = append(lines, "Recommended Next Actions:")
+		lines = append(lines, "Recommended Next Action:")
 		for _, action := range recommendedNextActions(validation, meta) {
 			lines = append(lines, fmt.Sprintf("- %s", action))
 		}
@@ -171,16 +188,13 @@ func collectEvidence(validation models.ValidationResult) []string {
 }
 
 func recommendedNextActions(validation models.ValidationResult, meta capabilityMetadata) []string {
-	actions := append([]string{}, meta.nextActionBase...)
-
-	switch validation.Status {
-	case models.StatusPass:
-		actions = append(actions, "Keep the artifact and observed evidence current as the system evolves.")
-	case models.StatusWarning:
-		actions = append(actions, "Treat this warning as an early signal and correct it before it becomes a failing bottleneck.")
-	case models.StatusFail:
-		actions = append(actions, "Resolve this bottleneck before relying on the system as valid for the selected environment.")
+	action := diagnosis.RecommendedAction(validation)
+	if action != "" {
+		return []string{action}
 	}
 
-	return actions
+	if len(meta.nextActionBase) > 0 {
+		return []string{meta.nextActionBase[0]}
+	}
+	return []string{"Inspect the validation output for this capability and update the affected evidence."}
 }

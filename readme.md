@@ -118,6 +118,19 @@ or:
 System incomplete
 ```
 
+### `bottleneck ingest`
+
+Ingest external tool output into normalized bottleneck artifacts.
+
+```sh
+bottleneck ingest cucumber --file reports/cucumber.json
+bottleneck ingest codeql --file results/codeql.sarif
+bottleneck ingest test-summary --file results/test-summary.json
+bottleneck ingest telemetry --file results/telemetry.json
+```
+
+Use `--dry-run` to parse and inspect normalized evidence without writing artifact files, and `--out` to override the default output path.
+
 ### `bottleneck explain`
 
 Explains the current validation state in a human-readable narrative without changing any files.
@@ -132,14 +145,16 @@ bottleneck explain --env=production --capability=Assurance
 
 The command reuses the validation engine and adds:
 
+- primary diagnosis when no capability filter is used
 - owner mapping
 - mapped bottlenecks
+- why-this-matters explanation
 - evidence/details
-- recommended next actions
+- one recommended next action
 
 ### `bottleneck scorecard`
 
-Summarizes release readiness in an evidence-backed scorecard with resolved thresholds, release recommendation, evidence counts, missing evidence, reasons, and recommended actions.
+Summarizes release readiness in an evidence-backed scorecard with deterministic diagnosis, category scores, resolved thresholds, release recommendation, evidence counts, missing evidence, reasons, and recommended actions.
 
 Examples:
 
@@ -173,6 +188,8 @@ Release recommendations:
 - `Unknown`: scorecard evidence is unavailable or not assessed
 
 Like `validate`, `scorecard` returns a non-zero exit code when the system is failing.
+
+Diagnosis scoring is derived from validation output. Passing BIASED categories start high, warnings score in the middle, failures score low, and missing, placeholder, weak, stale, or disconnected evidence reduces the score further. The primary bottleneck is the weakest BIASED category using this tie priority: Assurance, Security, Behavior, Intent, Execution, Design. When all assessed BIASED categories are strong, the primary bottleneck is `None`.
 
 When `--github-annotations` is used, `validate` and `scorecard` emit GitHub Actions workflow commands for warning and failing validation results. Failing results are emitted as `::error`; warning results are emitted as `::warning`. File paths are included when bottleneck can tie a finding to an artifact.
 

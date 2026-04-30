@@ -1,154 +1,4 @@
-package cmd
-
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/spf13/cobra"
-)
-
-var initDirectories = []string{
-	"bottleneck",
-	"bottleneck/behavior",
-	"bottleneck/intent",
-	"bottleneck/design",
-	"bottleneck/assurance",
-	"bottleneck/assurance/features",
-	"bottleneck/security",
-	"bottleneck/execution",
-	"bottleneck/docs",
-}
-
-var initFiles = map[string]string{
-	"bottleneck/config.yaml":                       defaultConfigYAML,
-	"bottleneck/behavior/behavior-spec.md":         defaultBehaviorSpec,
-	"bottleneck/intent/intent.md":                  defaultIntent,
-	"bottleneck/design/architecture.md":            defaultArchitecture,
-	"bottleneck/assurance/features/sample.feature": "Feature: Sample system validation\n\n  Scenario: System behaves as intended\n    Given the system is initialized\n    When validation artifacts are present\n    Then the outcomes should satisfy framework requirements\n",
-	"bottleneck/assurance/results.json":            defaultAssuranceResults,
-	"bottleneck/security/guardrails.json":          defaultSecurityGuardrails,
-	"bottleneck/execution/telemetry.json":          defaultExecutionTelemetry,
-	"bottleneck/docs/validation.md":                validationDocumentation,
-}
-
-const defaultConfigYAML = `environments:
-  default:
-    assurance:
-      min_accuracy: 0.90
-      max_failures: 0
-
-    execution:
-      max_error_rate: 0.05
-      min_adoption: 0.5
-
-  dev:
-    assurance:
-      min_accuracy: 0.85
-
-  test:
-    assurance:
-      min_accuracy: 0.90
-
-  stage:
-    assurance:
-      min_accuracy: 0.93
-
-  production:
-    assurance:
-      min_accuracy: 0.95
-`
-
-const defaultIntent = `# Intent
-
-## Outcomes
-
-### INTENT-001: Placeholder release readiness intent
-Refs:
-- BEHAVIOR-001
-
-Describe required outcomes.
-
-## Constraints
-
-Describe system constraints.
-
-## Success Criteria
-
-Describe measurable success criteria.
-`
-
-const defaultBehaviorSpec = `# Behavior Specification
-
-## Expected Behavior
-
-### BEHAVIOR-001: Placeholder release behavior
-Critical: true
-Refs:
-- INTENT-001
-- ASSURANCE-001
-
-Describe intended system behavior.
-
-## Unacceptable Behavior
-
-Describe behavior the system must prevent.
-`
-
-const defaultArchitecture = `# Architecture
-
-### DESIGN-001: Placeholder architecture evidence
-Refs:
-- INTENT-001
-- BEHAVIOR-001
-
-Describe system architecture.
-`
-
-const defaultAssuranceResults = `{
-  "scenarios_total": 1,
-  "scenarios_passed": 1,
-  "scenarios_failed": 0,
-  "failures": [],
-  "evidence": [
-    {
-      "id": "ASSURANCE-001",
-      "refs": ["BEHAVIOR-001"],
-      "source": "sample",
-      "status": "pass"
-    }
-  ]
-}
-`
-
-const defaultSecurityGuardrails = `{
-  "violations": 0,
-  "evidence": [
-    {
-      "id": "SECURITY-001",
-      "refs": ["BEHAVIOR-001", "ASSURANCE-001"],
-      "source": "sample",
-      "status": "pass"
-    }
-  ]
-}
-`
-
-const defaultExecutionTelemetry = `{
-  "adoption_rate": 0.9,
-  "error_rate": 0.01,
-  "evidence": [
-    {
-      "id": "EXECUTION-001",
-      "refs": ["BEHAVIOR-001", "ASSURANCE-001"],
-      "source": "sample",
-      "status": "pass"
-    }
-  ]
-}
-`
-
-const validationDocumentation = `# Framework Validation
+# Framework Validation
 
 ## 1. Capability Schemas
 
@@ -263,6 +113,7 @@ bottleneck validate loads config.yaml first, resolves inherited thresholds, and 
 
 ~~~sh
 bottleneck validate --env=production
+bottleneck validate --env=production --strict --github-annotations
 ~~~
 
 - Behavior -> validateBehavior()
@@ -277,12 +128,14 @@ The CLI enforces presence checks for required artifacts, schema checks for Markd
 
 Related read-only commands built on the same validation results:
 
-- bottleneck explain
+- `bottleneck explain`
   Produces a human-readable explanation with owner mapping, bottleneck mapping, evidence, and recommended next actions.
-- bottleneck scorecard
+- `bottleneck scorecard`
   Produces an evidence-backed scorecard summarizing release recommendation, effective thresholds, capability status, owner, bottleneck, evidence counts, missing evidence, reasons, and recommended actions.
-- bottleneck trace
+- `bottleneck trace`
   Shows outbound references, inbound references, evidence chains, broken references, and orphan warnings for a stable evidence ID.
+
+GitHub Actions integration uses the same validation engine and exit codes. `--github-annotations` emits workflow annotations for validation warnings and failures. `--strict` promotes placeholder or insufficient content from warnings to failures, making it appropriate for production pull request gates.
 
 ## 4. Example Output
 
@@ -309,7 +162,7 @@ Environment: production
 bottleneck explain --env=production --capability=Assurance
 ~~~
 
-Use explain when an operator needs remediation context for one or more capabilities.
+Use `explain` when an operator needs remediation context for one or more capabilities.
 
 ### Scorecard
 
@@ -320,9 +173,10 @@ bottleneck scorecard --env=production --format=markdown
 bottleneck scorecard --env=production --view=executive
 bottleneck scorecard --env=production --view=engineering
 bottleneck scorecard --env=production --view=governance
+bottleneck scorecard --env=production --view=governance --format=markdown
 ~~~
 
-Use scorecard when an operator needs release-readiness context for terminal review, GitHub summaries, release notes, governance review, or downstream automation. The scorecard includes a release recommendation of Proceed, Conditional, Block, or Unknown, and displays the effective assurance and execution thresholds resolved for the selected environment.
+Use `scorecard` when an operator needs release-readiness context for terminal review, GitHub summaries, release notes, governance review, or downstream automation. The scorecard includes a release recommendation of `Proceed`, `Conditional`, `Block`, or `Unknown`, and displays the effective assurance and execution thresholds resolved for the selected environment.
 
 ### Trace
 
@@ -332,7 +186,7 @@ bottleneck trace BEHAVIOR-001 --env=production
 bottleneck trace ASSURANCE-001 --format=json
 ~~~
 
-Use trace when an operator or reviewer needs to audit how a single evidence ID connects to intent, behavior, tests, security, and telemetry.
+Use `trace` when an operator or reviewer needs to audit how a single evidence ID connects to intent, behavior, tests, security, and telemetry.
 
 Traceability supports Markdown evidence headings and optional JSON evidence arrays:
 
@@ -357,46 +211,29 @@ Refs:
 }
 ~~~
 
-Evidence IDs must match ^(INTENT|BEHAVIOR|DESIGN|ASSURANCE|SECURITY|EXECUTION)-[0-9]{3,}$. Duplicate IDs, invalid references, and references to missing IDs fail validation. Orphaned or unmapped evidence creates warnings by default, and behavior-to-intent or critical-behavior-to-assurance gaps fail in --strict mode or production.
-`
+Evidence IDs must match `^(INTENT|BEHAVIOR|DESIGN|ASSURANCE|SECURITY|EXECUTION)-[0-9]{3,}$`. Duplicate IDs, invalid references, and references to missing IDs fail validation. Orphaned or unmapped evidence creates warnings by default, and behavior-to-intent or critical-behavior-to-assurance gaps fail in `--strict` mode or production.
 
-var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize framework evidence artifacts",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := initializeProject("."); err != nil {
-			return err
-		}
+## 6. GitHub Actions And Pull Requests
 
-		fmt.Println("bottleneck initialized framework evidence artifacts")
-		return nil
-	},
-}
+Copy workflow examples from `examples/github-actions/` into `.github/workflows/`:
 
-func init() {
-	rootCmd.AddCommand(initCmd)
-}
+- `bottleneck-validate.yml`
+- `bottleneck-scorecard.yml`
+- `bottleneck-pr-gate.yml`
 
-func initializeProject(basePath string) error {
-	for _, dir := range initDirectories {
-		if err := os.MkdirAll(filepath.Join(basePath, dir), 0o755); err != nil {
-			return err
-		}
-	}
+The PR gate pattern is:
 
-	for relativePath, content := range initFiles {
-		if err := writeFileIfMissing(filepath.Join(basePath, relativePath), content); err != nil {
-			return err
-		}
-	}
+~~~sh
+go build -o bottleneck .
+./bottleneck validate --env=production --strict --github-annotations
+./bottleneck scorecard --env=production --view=governance --format=markdown > bottleneck-scorecard.md
+cat bottleneck-scorecard.md >> "$GITHUB_STEP_SUMMARY"
+~~~
 
-	return nil
-}
+The PR comment workflow uses `actions/github-script` to update a comment containing `<!-- bottleneck-scorecard -->`. Required permissions are `contents: read` and `pull-requests: write`.
 
-func writeFileIfMissing(path string, content string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
+When running in GitHub Actions, scorecard output detects `GITHUB_ACTIONS`, the event name, repository, run ID, refs, SHA, and pull request fields from the event payload. When `GITHUB_TOKEN` is present, bottleneck optionally enriches the scorecard with changed files, review approvals, pending reviewers, and failed check runs. Missing token or unavailable metadata does not fail local or CI scorecard generation.
 
-	return os.WriteFile(path, []byte(content), 0o644)
-}
+Pull request risk signals warn on large changed file count, large additions plus deletions, draft PRs, missing requested reviewers, AI-generated or AI-assisted labels, missing approvals when review data is available, pending reviewers, failed check runs, and release-relevant source changes without matching `bottleneck/` artifact changes.
+
+Use `--env=dev`, `--env=stage`, or `--env=production` to choose thresholds. Use `--strict` when warnings for placeholder or insufficient evidence should block the pull request. bottleneck integrates with GitHub Actions and branch protection, but it does not replace CodeQL, CI, review rules, security scanners, or deployment controls.

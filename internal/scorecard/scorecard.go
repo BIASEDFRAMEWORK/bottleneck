@@ -5,121 +5,323 @@ import (
 	"fmt"
 	"strings"
 
-	"biased/internal/models"
+	"bottleneck/internal/githubactions"
+	"bottleneck/internal/models"
+	"bottleneck/internal/prrisk"
+)
+
+const (
+	SchemaVersion = "scorecard.v1"
+
+	FormatText     = "text"
+	FormatJSON     = "json"
+	FormatMarkdown = "markdown"
+
+	ViewExecutive   = "executive"
+	ViewEngineering = "engineering"
+	ViewGovernance  = "governance"
+
+	StatusPass    = "PASS"
+	StatusWarn    = "WARN"
+	StatusFail    = "FAIL"
+	StatusUnknown = "UNKNOWN"
+
+	RecommendationProceed     = "Proceed"
+	RecommendationConditional = "Conditional"
+	RecommendationBlock       = "Block"
+	RecommendationUnknown     = "Unknown"
 )
 
 type Scorecard struct {
-	Environment       string                `json:"environment"`
-	SystemStatus      string                `json:"system_status"`
-	PrimaryBottleneck string                `json:"primary_bottleneck"`
-	Capabilities      []CapabilityScorecard `json:"capabilities"`
-	BottomLine        string                `json:"bottom_line"`
+	SchemaVersion         string                     `json:"schema_version"`
+	Environment           string                     `json:"environment"`
+	SystemStatus          string                     `json:"system_status"`
+	ReleaseRecommendation string                     `json:"release_recommendation"`
+	PrimaryBottleneck     string                     `json:"primary_bottleneck"`
+	EffectiveThresholds   models.EffectiveThresholds `json:"effective_thresholds"`
+	GitHub                *githubactions.Metadata    `json:"github,omitempty"`
+	PullRequestRisk       []prrisk.Signal            `json:"pull_request_risk,omitempty"`
+	Capabilities          []CapabilityScorecard      `json:"capabilities"`
+	BottomLine            string                     `json:"bottom_line"`
 }
 
 type CapabilityScorecard struct {
-	Capability string `json:"capability"`
-	Status     string `json:"status"`
-	Owner      string `json:"owner"`
-	Bottleneck string `json:"bottleneck"`
-	Evidence   string `json:"evidence"`
+	Capability        string   `json:"capability"`
+	Status            string   `json:"status"`
+	Owner             string   `json:"owner"`
+	Bottleneck        string   `json:"bottleneck"`
+	EvidenceCount     int      `json:"evidence_count"`
+	MissingEvidence   []string `json:"missing_evidence"`
+	Reason            string   `json:"reason"`
+	RecommendedAction string   `json:"recommended_action"`
+	Evidence          []string `json:"evidence"`
 }
 
 type capabilityMetadata struct {
-	owner      string
-	bottleneck string
+	owner             string
+	bottleneck        string
+	passingArtifact   string
+	missingEvidence   string
+	recommendedAction string
+	passAction        string
+}
+
+type Options struct {
+	View   string
+	GitHub *githubactions.Metadata
 }
 
 var metadataByCapability = map[string]capabilityMetadata{
 	"Intent": {
-		owner:      "Intent Engineer",
-		bottleneck: "Ambiguous requirements",
+		owner:             "Intent Engineer",
+		bottleneck:        "Ambiguous requirements",
+		passingArtifact:   "bottleneck/intent/intent.md",
+		missingEvidence:   "Add validation details for bottleneck/intent/intent.md showing concrete outcomes, constraints, and success criteria.",
+		recommendedAction: "Update intent.md with concrete outcomes, constraints, and measurable success criteria.",
+		passAction:        "Keep intent.md aligned with current release goals.",
 	},
 	"Behavior": {
-		owner:      "Behavior Engineer",
-		bottleneck: "Non-deterministic outputs",
+		owner:             "Behavior Engineer",
+		bottleneck:        "Non-deterministic outputs",
+		passingArtifact:   "bottleneck/behavior/behavior-spec.md",
+		missingEvidence:   "Add validation details for bottleneck/behavior/behavior-spec.md showing expected and unacceptable behavior.",
+		recommendedAction: "Update behavior-spec.md with concrete expected and unacceptable behavior evidence.",
+		passAction:        "Keep behavior-spec.md current as behavior changes.",
 	},
 	"Design": {
-		owner:      "Design Engineer",
-		bottleneck: "Poor adoption / UX gaps",
+		owner:             "Design Engineer",
+		bottleneck:        "Poor adoption / UX gaps",
+		passingArtifact:   "bottleneck/design/architecture.md",
+		missingEvidence:   "Add validation details for bottleneck/design/architecture.md showing the architecture is reviewable.",
+		recommendedAction: "Expand architecture.md with concrete architecture and operational design evidence.",
+		passAction:        "Keep architecture.md synchronized with implementation changes.",
 	},
 	"Assurance": {
-		owner:      "Assurance Engineer",
-		bottleneck: "Validation gaps",
+		owner:             "Assurance Engineer",
+		bottleneck:        "Validation gaps",
+		passingArtifact:   "bottleneck/assurance/results.json",
+		missingEvidence:   "Add assurance metrics from bottleneck/assurance/results.json.",
+		recommendedAction: "Fix failing scenarios or regenerate external BDD results.",
+		passAction:        "Keep assurance results current with the latest test run.",
 	},
 	"Security": {
-		owner:      "Security Engineer",
-		bottleneck: "Risk & compliance",
+		owner:             "Security Engineer",
+		bottleneck:        "Risk & compliance",
+		passingArtifact:   "bottleneck/security/guardrails.json",
+		missingEvidence:   "Add guardrail evidence from bottleneck/security/guardrails.json.",
+		recommendedAction: "Remove policy violations or regenerate guardrail evidence.",
+		passAction:        "Keep guardrail evidence current with security policy changes.",
 	},
 	"Execution": {
-		owner:      "Execution Engineer",
-		bottleneck: "Delivery friction",
+		owner:             "Execution Engineer",
+		bottleneck:        "Delivery friction",
+		passingArtifact:   "bottleneck/execution/telemetry.json",
+		missingEvidence:   "Add telemetry evidence from bottleneck/execution/telemetry.json.",
+		recommendedAction: "Review telemetry and improve reliability or adoption before release.",
+		passAction:        "Keep telemetry evidence current for the selected environment.",
+	},
+	"Traceability": {
+		owner:             "Release Engineer",
+		bottleneck:        "Traceability gaps",
+		passingArtifact:   "bottleneck/*",
+		missingEvidence:   "Add evidence IDs and Refs links across intent, behavior, assurance, security, and execution artifacts.",
+		recommendedAction: "Run bottleneck trace for the affected ID and repair missing, duplicate, or orphaned evidence links.",
+		passAction:        "Keep evidence IDs and Refs links current as release evidence changes.",
 	},
 	"Config": {
-		owner:      "Execution Engineer",
-		bottleneck: "Delivery friction",
+		owner:             "Execution Engineer",
+		bottleneck:        "Delivery friction",
+		passingArtifact:   "bottleneck/config.yaml",
+		missingEvidence:   "Repair bottleneck/config.yaml so effective thresholds can be resolved.",
+		recommendedAction: "Repair bottleneck/config.yaml and rerun the scorecard.",
+		passAction:        "Keep config.yaml thresholds aligned with release policy.",
 	},
 }
 
 func Build(result models.EngineResult) Scorecard {
+	return BuildWithOptions(result, Options{})
+}
+
+func BuildWithOptions(result models.EngineResult, options Options) Scorecard {
 	capabilities := make([]CapabilityScorecard, 0, len(result.Results))
 	for _, validation := range result.Results {
-		meta := metadataFor(validation.Capability)
-		capabilities = append(capabilities, CapabilityScorecard{
-			Capability: validation.Capability,
-			Status:     displayStatus(validation.Status),
-			Owner:      meta.owner,
-			Bottleneck: meta.bottleneck,
-			Evidence:   evidenceFor(validation),
-		})
+		capabilities = append(capabilities, buildCapability(validation))
 	}
 
-	return Scorecard{
-		Environment:       result.Environment,
-		SystemStatus:      result.SystemStatus,
-		PrimaryBottleneck: result.PrimaryBottleneck,
-		Capabilities:      capabilities,
-		BottomLine:        bottomLine(result),
+	card := Scorecard{
+		SchemaVersion:         SchemaVersion,
+		Environment:           result.Environment,
+		SystemStatus:          displayStatus(result.SystemStatus),
+		PrimaryBottleneck:     primaryBottleneck(result.PrimaryBottleneck),
+		EffectiveThresholds:   result.EffectiveThresholds,
+		Capabilities:          capabilities,
+		ReleaseRecommendation: releaseRecommendationFor(capabilities, displayStatus(result.SystemStatus)),
 	}
+	if options.GitHub != nil && options.GitHub.Detected {
+		metadata := *options.GitHub
+		card.GitHub = &metadata
+		card.PullRequestRisk = prrisk.Assess(metadata)
+	}
+	card.BottomLine = bottomLine(card)
+
+	return card
 }
 
-func Render(result models.EngineResult, format string) (string, error) {
-	card := Build(result)
+func Render(result models.EngineResult, format string, viewValues ...string) (string, error) {
+	view := ""
+	if len(viewValues) > 0 {
+		view = viewValues[0]
+	}
+
+	return RenderWithOptions(result, format, Options{View: view})
+}
+
+func RenderWithOptions(result models.EngineResult, format string, options Options) (string, error) {
+	view, err := normalizeView(options.View)
+	if err != nil {
+		return "", err
+	}
+
+	card := BuildWithOptions(result, options)
 
 	switch strings.ToLower(format) {
-	case "text":
-		return renderText(card), nil
-	case "json":
+	case FormatText:
+		return renderText(card, view), nil
+	case FormatJSON:
 		return renderJSON(card)
+	case FormatMarkdown:
+		return renderMarkdown(card, view), nil
 	default:
-		return "", fmt.Errorf("unsupported format %q", format)
+		return "", fmt.Errorf("unsupported format %q (supported: text, json, markdown)", format)
 	}
 }
 
-func renderText(card Scorecard) string {
+func buildCapability(validation models.ValidationResult) CapabilityScorecard {
+	meta := metadataFor(validation.Capability)
+	evidence := evidenceItems(validation)
+	missingEvidence := missingEvidenceFor(validation, evidence, meta)
+
+	return CapabilityScorecard{
+		Capability:        validation.Capability,
+		Status:            displayStatus(validation.Status),
+		Owner:             meta.owner,
+		Bottleneck:        meta.bottleneck,
+		EvidenceCount:     len(evidence),
+		MissingEvidence:   missingEvidence,
+		Reason:            reasonFor(validation),
+		RecommendedAction: recommendedActionFor(validation, meta),
+		Evidence:          evidence,
+	}
+}
+
+func renderText(card Scorecard, view string) string {
+	switch view {
+	case ViewExecutive:
+		return renderExecutiveText(card)
+	case ViewGovernance:
+		return renderGovernanceText(card)
+	default:
+		return renderEngineeringText(card)
+	}
+}
+
+func renderEngineeringText(card Scorecard) string {
 	var lines []string
-	lines = append(lines,
-		"BIASED System Scorecard",
-		"",
-		fmt.Sprintf("Environment: %s", card.Environment),
-		fmt.Sprintf("System Status: %s", card.SystemStatus),
-		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
-		"",
-		fmt.Sprintf("%-12s %-8s %-24s %-28s %s", "Capability", "Status", "Owner", "Bottleneck", "Evidence"),
-		fmt.Sprintf("%-12s %-8s %-24s %-28s %s", "----------", "------", "-----", "----------", "--------"),
-	)
+	lines = append(lines, scorecardHeader(card)...)
+	lines = appendGitHubText(lines, card)
+	lines = append(lines, "", "Effective Thresholds:")
+	lines = append(lines, thresholdLines(card.EffectiveThresholds, "  ")...)
+	lines = append(lines, "", "Capabilities:")
+	lines = append(lines, fmt.Sprintf("%-12s %-8s %-8s %-24s %s", "Capability", "Status", "Evidence", "Owner", "Reason"))
+	lines = append(lines, fmt.Sprintf("%-12s %-8s %-8s %-24s %s", "----------", "------", "--------", "-----", "------"))
 
 	for _, capability := range card.Capabilities {
 		lines = append(lines, fmt.Sprintf(
-			"%-12s %-8s %-24s %-28s %s",
+			"%-12s %-8s %-8d %-24s %s",
 			capability.Capability,
 			capability.Status,
+			capability.EvidenceCount,
 			capability.Owner,
-			capability.Bottleneck,
-			capability.Evidence,
+			capability.Reason,
 		))
 	}
 
+	lines = append(lines, "", "Capability Details:")
+	for _, capability := range card.Capabilities {
+		lines = append(lines, "")
+		lines = append(lines,
+			fmt.Sprintf("%s:", capability.Capability),
+			fmt.Sprintf("  Status: %s", capability.Status),
+			fmt.Sprintf("  Owner: %s", capability.Owner),
+			fmt.Sprintf("  Bottleneck: %s", capability.Bottleneck),
+			fmt.Sprintf("  Reason: %s", capability.Reason),
+			fmt.Sprintf("  Recommended Action: %s", capability.RecommendedAction),
+			"  Evidence:",
+		)
+		lines = appendBulletLines(lines, capability.Evidence, "    ", "None reported.")
+		lines = append(lines, "  Missing Evidence:")
+		lines = appendBulletLines(lines, capability.MissingEvidence, "    ", "None.")
+	}
+
 	lines = append(lines, "", "Bottom line:", card.BottomLine)
+	return strings.Join(lines, "\n")
+}
+
+func renderExecutiveText(card Scorecard) string {
+	var lines []string
+	lines = append(lines,
+		"bottleneck SDLC Scorecard - Executive View",
+		"",
+		fmt.Sprintf("Environment: %s", card.Environment),
+		fmt.Sprintf("System Status: %s", card.SystemStatus),
+		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
+		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
+	)
+	lines = appendGitHubText(lines, card)
+	lines = append(lines, "", "Capability Status Summary:")
+
+	for _, line := range statusSummaryLines(card) {
+		lines = append(lines, "  "+line)
+	}
+
+	lines = append(lines, "", "Capabilities:")
+	for _, capability := range card.Capabilities {
+		lines = append(lines, fmt.Sprintf("  %s: %s", capability.Capability, capability.Status))
+	}
+
+	lines = append(lines, "", "Bottom line:", card.BottomLine)
+	return strings.Join(lines, "\n")
+}
+
+func renderGovernanceText(card Scorecard) string {
+	var lines []string
+	lines = append(lines,
+		"bottleneck SDLC Scorecard - Governance View",
+		"",
+		fmt.Sprintf("Environment: %s", card.Environment),
+		fmt.Sprintf("System Status: %s", card.SystemStatus),
+		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
+		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
+	)
+	lines = appendGitHubText(lines, card)
+	lines = append(lines, "", "Effective Thresholds:")
+	lines = append(lines, thresholdLines(card.EffectiveThresholds, "  ")...)
+	lines = append(lines, "", "Governance Signals:")
+
+	for _, capabilityName := range []string{"Security", "Assurance", "Execution"} {
+		capability, ok := capabilityByName(card, capabilityName)
+		if !ok {
+			lines = append(lines, fmt.Sprintf("  %s: UNKNOWN - validation evidence unavailable", capabilityName))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  %s: %s - %s", capability.Capability, capability.Status, capability.Reason))
+	}
+
+	lines = append(lines, "  Governance Evidence: not assessed (no governance artifact exists yet)")
+	lines = append(lines, "", "Missing Evidence Blocking Or Conditioning Release:")
+	missing := governanceMissingEvidence(card)
+	lines = appendBulletLines(lines, missing, "  ", "None.")
+	lines = append(lines, "", "Release Decision Summary:", card.BottomLine)
 	return strings.Join(lines, "\n")
 }
 
@@ -131,61 +333,548 @@ func renderJSON(card Scorecard) (string, error) {
 	return string(content), nil
 }
 
+func renderMarkdown(card Scorecard, view string) string {
+	switch view {
+	case ViewExecutive:
+		return renderExecutiveMarkdown(card)
+	case ViewGovernance:
+		return renderGovernanceMarkdown(card)
+	default:
+		return renderEngineeringMarkdown(card)
+	}
+}
+
+func renderEngineeringMarkdown(card Scorecard) string {
+	var lines []string
+	lines = append(lines, markdownSummary(card)...)
+	lines = appendGitHubMarkdown(lines, card)
+	lines = append(lines, "", "## Effective Thresholds", "", "| Threshold | Value |", "| --- | ---: |")
+	for _, threshold := range thresholdRows(card.EffectiveThresholds) {
+		lines = append(lines, fmt.Sprintf("| %s | %s |", threshold.name, threshold.value))
+	}
+	lines = append(lines, "", "## Capabilities", "", "| Capability | Status | Evidence | Missing Evidence | Recommendation |", "| --- | --- | ---: | --- | --- |")
+	for _, capability := range card.Capabilities {
+		lines = append(lines, fmt.Sprintf(
+			"| %s | %s | %d | %s | %s |",
+			markdownCell(capability.Capability),
+			markdownCell(capability.Status),
+			capability.EvidenceCount,
+			markdownCell(joinMarkdownList(capability.MissingEvidence, "None")),
+			markdownCell(capability.RecommendedAction),
+		))
+	}
+	lines = append(lines, "", "## Evidence")
+	for _, capability := range card.Capabilities {
+		lines = append(lines, "", fmt.Sprintf("### %s", capability.Capability))
+		lines = append(lines, fmt.Sprintf("- Reason: %s", markdownText(capability.Reason)))
+		lines = append(lines, "- Evidence:")
+		lines = appendMarkdownBullets(lines, capability.Evidence, "  ", "None reported.")
+		lines = append(lines, "- Missing Evidence:")
+		lines = appendMarkdownBullets(lines, capability.MissingEvidence, "  ", "None.")
+	}
+	lines = append(lines, "", "## Bottom Line", "", card.BottomLine)
+	return strings.Join(lines, "\n")
+}
+
+func renderExecutiveMarkdown(card Scorecard) string {
+	var lines []string
+	lines = append(lines, "# bottleneck Scorecard", "")
+	lines = append(lines, "| Field | Value |", "| --- | --- |")
+	lines = append(lines,
+		fmt.Sprintf("| Environment | %s |", markdownCell(card.Environment)),
+		fmt.Sprintf("| System Status | %s |", markdownCell(card.SystemStatus)),
+		fmt.Sprintf("| Release Recommendation | %s |", markdownCell(card.ReleaseRecommendation)),
+		fmt.Sprintf("| Primary Bottleneck | %s |", markdownCell(card.PrimaryBottleneck)),
+	)
+	lines = appendGitHubMarkdown(lines, card)
+	lines = append(lines, "", "## Capability Status Summary", "", "| Status | Count |", "| --- | ---: |")
+	for _, line := range statusSummaryRows(card) {
+		lines = append(lines, fmt.Sprintf("| %s | %d |", line.status, line.count))
+	}
+	lines = append(lines, "", "## Bottom Line", "", card.BottomLine)
+	return strings.Join(lines, "\n")
+}
+
+func renderGovernanceMarkdown(card Scorecard) string {
+	var lines []string
+	lines = append(lines, markdownSummary(card)...)
+	lines = appendGitHubMarkdown(lines, card)
+	lines = append(lines, "", "## Effective Thresholds", "", "| Threshold | Value |", "| --- | ---: |")
+	for _, threshold := range thresholdRows(card.EffectiveThresholds) {
+		lines = append(lines, fmt.Sprintf("| %s | %s |", threshold.name, threshold.value))
+	}
+	lines = append(lines, "", "## Governance Signals", "", "| Signal | Status | Reason |", "| --- | --- | --- |")
+	for _, capabilityName := range []string{"Security", "Assurance", "Execution"} {
+		capability, ok := capabilityByName(card, capabilityName)
+		if !ok {
+			lines = append(lines, fmt.Sprintf("| %s | UNKNOWN | validation evidence unavailable |", capabilityName))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("| %s | %s | %s |", markdownCell(capability.Capability), markdownCell(capability.Status), markdownCell(capability.Reason)))
+	}
+	lines = append(lines, "| Governance Evidence | UNKNOWN | not assessed; no governance artifact exists yet |")
+	lines = append(lines, "", "## Missing Evidence Blocking Or Conditioning Release")
+	lines = appendMarkdownBullets(lines, governanceMissingEvidence(card), "", "None.")
+	lines = append(lines, "", "## Release Decision Summary", "", card.BottomLine)
+	return strings.Join(lines, "\n")
+}
+
+func markdownSummary(card Scorecard) []string {
+	return []string{
+		"# bottleneck Scorecard",
+		"",
+		"| Field | Value |",
+		"| --- | --- |",
+		fmt.Sprintf("| Environment | %s |", markdownCell(card.Environment)),
+		fmt.Sprintf("| System Status | %s |", markdownCell(card.SystemStatus)),
+		fmt.Sprintf("| Release Recommendation | %s |", markdownCell(card.ReleaseRecommendation)),
+		fmt.Sprintf("| Primary Bottleneck | %s |", markdownCell(card.PrimaryBottleneck)),
+	}
+}
+
+func scorecardHeader(card Scorecard) []string {
+	return []string{
+		"bottleneck SDLC Scorecard",
+		"",
+		fmt.Sprintf("Environment: %s", card.Environment),
+		fmt.Sprintf("System Status: %s", card.SystemStatus),
+		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
+		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
+	}
+}
+
+func appendGitHubText(lines []string, card Scorecard) []string {
+	if card.GitHub == nil {
+		return lines
+	}
+
+	lines = append(lines, "", "GitHub Actions:")
+	lines = append(lines, fmt.Sprintf("  Event: %s", emptyText(card.GitHub.EventName, "unknown")))
+	lines = append(lines, fmt.Sprintf("  Repository: %s", emptyText(card.GitHub.Repository, "unknown")))
+	if card.GitHub.RunID != "" {
+		lines = append(lines, fmt.Sprintf("  Run ID: %s", card.GitHub.RunID))
+	}
+	if card.GitHub.PullRequest != nil {
+		pr := card.GitHub.PullRequest
+		lines = append(lines,
+			fmt.Sprintf("  Pull Request: #%d %s", pr.Number, pr.Title),
+			fmt.Sprintf("  Base: %s", emptyText(pr.BaseRef, "unknown")),
+			fmt.Sprintf("  Head: %s", emptyText(pr.HeadRef, "unknown")),
+		)
+		if pr.Author != "" {
+			lines = append(lines, fmt.Sprintf("  Author: %s", pr.Author))
+		}
+	}
+	lines = append(lines, "  PR Risk Signals:")
+	for _, signal := range card.PullRequestRisk {
+		evidence := ""
+		if signal.Evidence != "" {
+			evidence = " (" + signal.Evidence + ")"
+		}
+		lines = append(lines, fmt.Sprintf("    - %s: %s%s", signal.Level, signal.Message, evidence))
+	}
+	if len(card.PullRequestRisk) == 0 {
+		lines = append(lines, "    - None.")
+	}
+	for _, warning := range card.GitHub.Warnings {
+		lines = append(lines, fmt.Sprintf("    - UNKNOWN: %s", warning))
+	}
+
+	return lines
+}
+
+func appendGitHubMarkdown(lines []string, card Scorecard) []string {
+	if card.GitHub == nil {
+		return lines
+	}
+
+	lines = append(lines, "", "## GitHub Pull Request Context", "", "| Field | Value |", "| --- | --- |")
+	lines = append(lines,
+		fmt.Sprintf("| Event | %s |", markdownCell(emptyText(card.GitHub.EventName, "unknown"))),
+		fmt.Sprintf("| Repository | %s |", markdownCell(emptyText(card.GitHub.Repository, "unknown"))),
+	)
+	if card.GitHub.RunID != "" {
+		lines = append(lines, fmt.Sprintf("| Run ID | %s |", markdownCell(card.GitHub.RunID)))
+	}
+	if card.GitHub.PullRequest != nil {
+		pr := card.GitHub.PullRequest
+		lines = append(lines,
+			fmt.Sprintf("| Pull Request | #%d %s |", pr.Number, markdownCell(pr.Title)),
+			fmt.Sprintf("| Base | %s |", markdownCell(emptyText(pr.BaseRef, "unknown"))),
+			fmt.Sprintf("| Head | %s |", markdownCell(emptyText(pr.HeadRef, "unknown"))),
+			fmt.Sprintf("| Author | %s |", markdownCell(emptyText(pr.Author, "unknown"))),
+		)
+		if pr.ChangedFiles != nil {
+			lines = append(lines, fmt.Sprintf("| Changed Files | %d |", *pr.ChangedFiles))
+		}
+		if pr.Additions != nil && pr.Deletions != nil {
+			lines = append(lines, fmt.Sprintf("| Diff Size | +%d / -%d |", *pr.Additions, *pr.Deletions))
+		}
+	}
+
+	lines = append(lines, "", "## Pull Request Risk Signals")
+	if len(card.PullRequestRisk) == 0 && len(card.GitHub.Warnings) == 0 {
+		lines = append(lines, "- None.")
+		return lines
+	}
+	for _, signal := range card.PullRequestRisk {
+		evidence := ""
+		if signal.Evidence != "" {
+			evidence = " (" + markdownText(signal.Evidence) + ")"
+		}
+		lines = append(lines, fmt.Sprintf("- **%s**: %s%s", markdownText(signal.Level), markdownText(signal.Message), evidence))
+	}
+	for _, warning := range card.GitHub.Warnings {
+		lines = append(lines, fmt.Sprintf("- **UNKNOWN**: %s", markdownText(warning)))
+	}
+
+	return lines
+}
+
+func emptyText(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func thresholdLines(thresholds models.EffectiveThresholds, prefix string) []string {
+	rows := thresholdRows(thresholds)
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines = append(lines, fmt.Sprintf("%s%s: %s", prefix, row.name, row.value))
+	}
+	return lines
+}
+
+type thresholdRow struct {
+	name  string
+	value string
+}
+
+func thresholdRows(thresholds models.EffectiveThresholds) []thresholdRow {
+	return []thresholdRow{
+		{name: "assurance.min_accuracy", value: fmt.Sprintf("%.2f", thresholds.Assurance.MinAccuracy)},
+		{name: "assurance.max_failures", value: fmt.Sprintf("%d", thresholds.Assurance.MaxFailures)},
+		{name: "execution.max_error_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.MaxErrorRate)},
+		{name: "execution.min_adoption", value: fmt.Sprintf("%.2f", thresholds.Execution.MinAdoption)},
+	}
+}
+
+func evidenceItems(validation models.ValidationResult) []string {
+	evidence := append([]string{}, validation.Details...)
+	if len(evidence) == 0 && validation.Message != "" && displayStatus(validation.Status) != StatusPass {
+		evidence = append(evidence, validation.Message)
+	}
+	return evidence
+}
+
+func missingEvidenceFor(validation models.ValidationResult, evidence []string, meta capabilityMetadata) []string {
+	var missing []string
+	status := displayStatus(validation.Status)
+	message := strings.ToLower(validation.Message)
+
+	for _, detail := range validation.Details {
+		if missingDetail := missingEvidenceFromDetail(detail); missingDetail != "" {
+			missing = append(missing, missingDetail)
+		}
+	}
+
+	switch {
+	case status == StatusUnknown:
+		missing = append(missing, fmt.Sprintf("%s was not assessed by validation.", validation.Capability))
+	case strings.Contains(message, "missing or invalid config.yaml"):
+		missing = append(missing, "Repair bottleneck/config.yaml so effective thresholds can be resolved.")
+	case strings.Contains(message, "missing behavior-spec.md"):
+		missing = append(missing, "Create bottleneck/behavior/behavior-spec.md with Expected Behavior and Unacceptable Behavior evidence.")
+	case strings.Contains(message, "missing intent.md"):
+		missing = append(missing, "Create bottleneck/intent/intent.md with Outcomes, Constraints, and Success Criteria evidence.")
+	case strings.Contains(message, "missing architecture.md"):
+		missing = append(missing, "Create bottleneck/design/architecture.md with architecture evidence.")
+	case strings.Contains(message, "missing results.json"):
+		missing = append(missing, "Provide bottleneck/assurance/results.json from the external BDD results.")
+	case strings.Contains(message, "missing guardrails.json"):
+		missing = append(missing, "Provide bottleneck/security/guardrails.json with guardrail violation evidence.")
+	case strings.Contains(message, "missing telemetry.json"):
+		missing = append(missing, "Provide bottleneck/execution/telemetry.json with adoption and error-rate evidence.")
+	case strings.Contains(message, "required sections missing"):
+		missing = append(missing, requiredSectionsMissingEvidence(validation.Capability))
+	case strings.Contains(message, "empty"):
+		missing = append(missing, fmt.Sprintf("Add substantive evidence to %s.", meta.passingArtifact))
+	case strings.Contains(message, "invalid results.json"):
+		missing = append(missing, "Regenerate bottleneck/assurance/results.json as valid assurance JSON.")
+	case strings.Contains(message, "invalid guardrails.json"):
+		missing = append(missing, "Regenerate bottleneck/security/guardrails.json as valid guardrail JSON.")
+	case strings.Contains(message, "invalid telemetry.json"):
+		missing = append(missing, "Regenerate bottleneck/execution/telemetry.json as valid telemetry JSON.")
+	case strings.Contains(message, "low adoption"):
+		missing = append(missing, "Provide adoption evidence at or above execution.min_adoption.")
+	case strings.Contains(message, "threshold"):
+		missing = append(missing, fmt.Sprintf("Provide %s evidence that satisfies the effective thresholds.", strings.ToLower(validation.Capability)))
+	case strings.Contains(message, "violations detected"):
+		missing = append(missing, "Provide security evidence with zero guardrail violations.")
+	}
+
+	if len(evidence) == 0 {
+		missing = append(missing, meta.missingEvidence)
+	}
+
+	return uniqueStrings(missing)
+}
+
+func missingEvidenceFromDetail(detail string) string {
+	switch {
+	case strings.Contains(detail, "still contains placeholder content"):
+		return strings.Replace(detail, "still contains placeholder content", "needs real evidence", 1)
+	case strings.Contains(detail, "is too thin to validate"):
+		return strings.Replace(detail, "is too thin to validate", "needs a meaningful sentence or list item", 1)
+	default:
+		return ""
+	}
+}
+
+func reasonFor(validation models.ValidationResult) string {
+	if validation.Message != "" {
+		return validation.Message
+	}
+
+	switch displayStatus(validation.Status) {
+	case StatusPass:
+		return "validation passed"
+	case StatusWarn:
+		return "validation warning reported"
+	case StatusFail:
+		return "validation failure reported"
+	default:
+		return "validation status unavailable"
+	}
+}
+
+func recommendedActionFor(validation models.ValidationResult, meta capabilityMetadata) string {
+	switch displayStatus(validation.Status) {
+	case StatusPass:
+		return meta.passAction
+	case StatusUnknown:
+		return "Run validation before using this scorecard for release decisions."
+	default:
+		return meta.recommendedAction
+	}
+}
+
+func releaseRecommendationFor(capabilities []CapabilityScorecard, systemStatus string) string {
+	if systemStatus == StatusUnknown || len(capabilities) == 0 {
+		return RecommendationUnknown
+	}
+
+	hasWarning := false
+	for _, capability := range capabilities {
+		switch capability.Status {
+		case StatusFail:
+			return RecommendationBlock
+		case StatusUnknown:
+			return RecommendationUnknown
+		case StatusWarn:
+			hasWarning = true
+		}
+	}
+
+	if hasWarning || systemStatus == StatusWarn {
+		return RecommendationConditional
+	}
+
+	return RecommendationProceed
+}
+
+func bottomLine(card Scorecard) string {
+	switch card.ReleaseRecommendation {
+	case RecommendationBlock:
+		return fmt.Sprintf(
+			"The system is not valid for %s. Primary ownership starts with %s.",
+			card.Environment,
+			metadataFor(card.PrimaryBottleneck).owner,
+		)
+	case RecommendationConditional:
+		return fmt.Sprintf(
+			"The system has warnings for %s. Primary ownership starts with %s.",
+			card.Environment,
+			metadataFor(card.PrimaryBottleneck).owner,
+		)
+	case RecommendationProceed:
+		return fmt.Sprintf(
+			"The system is valid for %s. Continue monitoring all capability signals.",
+			card.Environment,
+		)
+	default:
+		return fmt.Sprintf(
+			"The release posture for %s is unknown because required scorecard evidence is unavailable.",
+			card.Environment,
+		)
+	}
+}
+
+func displayStatus(status string) string {
+	switch strings.ToUpper(status) {
+	case models.StatusPass:
+		return StatusPass
+	case models.StatusWarning, StatusWarn:
+		return StatusWarn
+	case models.StatusFail:
+		return StatusFail
+	case StatusUnknown:
+		return StatusUnknown
+	default:
+		return StatusUnknown
+	}
+}
+
 func metadataFor(capability string) capabilityMetadata {
 	if meta, ok := metadataByCapability[capability]; ok {
 		return meta
 	}
 
 	return capabilityMetadata{
-		owner:      "Execution Engineer",
-		bottleneck: "Delivery friction",
+		owner:             "Execution Engineer",
+		bottleneck:        "Delivery friction",
+		passingArtifact:   strings.ToLower(capability),
+		missingEvidence:   fmt.Sprintf("Add validation evidence for %s.", capability),
+		recommendedAction: "Inspect the underlying artifact and validation output for this capability.",
+		passAction:        "Keep the artifact and observed evidence current.",
 	}
 }
 
-func evidenceFor(validation models.ValidationResult) string {
-	if validation.Message != "" {
-		return validation.Message
+func primaryBottleneck(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "None"
 	}
-	if len(validation.Details) > 0 {
-		return strings.Join(validation.Details, "; ")
+	return value
+}
+
+func normalizeView(viewValues ...string) (string, error) {
+	view := ViewEngineering
+	if len(viewValues) > 0 && strings.TrimSpace(viewValues[0]) != "" {
+		view = strings.ToLower(viewValues[0])
 	}
 
-	switch validation.Capability {
-	case "Intent":
-		return "intent.md valid"
-	case "Behavior":
-		return "behavior-spec.md valid"
-	case "Design":
-		return "architecture.md valid"
-	case "Security":
-		return "guardrails valid"
-	case "Execution":
-		return "telemetry valid"
-	case "Config":
-		return "config.yaml valid"
+	switch view {
+	case ViewExecutive, ViewEngineering, ViewGovernance:
+		return view, nil
 	default:
-		return "artifact valid"
+		return "", fmt.Errorf("unsupported view %q (supported: executive, engineering, governance)", view)
 	}
 }
 
-func bottomLine(result models.EngineResult) string {
-	if result.SystemStatus == models.StatusFail {
-		return fmt.Sprintf(
-			"The system is not valid for %s. Primary ownership starts with %s.",
-			result.Environment,
-			metadataFor(result.PrimaryBottleneck).owner,
-		)
+func capabilityByName(card Scorecard, capabilityName string) (CapabilityScorecard, bool) {
+	for _, capability := range card.Capabilities {
+		if capability.Capability == capabilityName {
+			return capability, true
+		}
 	}
-
-	return fmt.Sprintf(
-		"The system is valid for %s. Continue monitoring all capability signals.",
-		result.Environment,
-	)
+	return CapabilityScorecard{}, false
 }
 
-func displayStatus(status string) string {
-	if status == models.StatusWarning {
-		return "WARN"
+func governanceMissingEvidence(card Scorecard) []string {
+	var missing []string
+	for _, capability := range card.Capabilities {
+		if capability.Status == StatusFail || capability.Status == StatusWarn || len(capability.MissingEvidence) > 0 {
+			missing = append(missing, capability.MissingEvidence...)
+		}
 	}
-	return status
+	missing = append(missing, "Governance evidence not assessed: no governance artifact exists yet.")
+	return uniqueStrings(missing)
+}
+
+func requiredSectionsMissingEvidence(capability string) string {
+	switch capability {
+	case "Behavior":
+		return "Add ## Expected Behavior and ## Unacceptable Behavior sections to bottleneck/behavior/behavior-spec.md."
+	case "Intent":
+		return "Add ## Outcomes, ## Constraints, and ## Success Criteria sections to bottleneck/intent/intent.md."
+	default:
+		return fmt.Sprintf("Add the required Markdown sections for %s.", capability)
+	}
+}
+
+func statusSummaryLines(card Scorecard) []string {
+	rows := statusSummaryRows(card)
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines = append(lines, fmt.Sprintf("%s: %d", row.status, row.count))
+	}
+	return lines
+}
+
+type statusSummaryRow struct {
+	status string
+	count  int
+}
+
+func statusSummaryRows(card Scorecard) []statusSummaryRow {
+	counts := map[string]int{
+		StatusPass:    0,
+		StatusWarn:    0,
+		StatusFail:    0,
+		StatusUnknown: 0,
+	}
+	for _, capability := range card.Capabilities {
+		counts[capability.Status]++
+	}
+
+	return []statusSummaryRow{
+		{status: StatusPass, count: counts[StatusPass]},
+		{status: StatusWarn, count: counts[StatusWarn]},
+		{status: StatusFail, count: counts[StatusFail]},
+		{status: StatusUnknown, count: counts[StatusUnknown]},
+	}
+}
+
+func appendBulletLines(lines []string, items []string, prefix string, emptyText string) []string {
+	if len(items) == 0 {
+		return append(lines, prefix+"- "+emptyText)
+	}
+
+	for _, item := range items {
+		lines = append(lines, prefix+"- "+item)
+	}
+	return lines
+}
+
+func appendMarkdownBullets(lines []string, items []string, prefix string, emptyText string) []string {
+	if len(items) == 0 {
+		return append(lines, prefix+"- "+markdownText(emptyText))
+	}
+
+	for _, item := range items {
+		lines = append(lines, prefix+"- "+markdownText(item))
+	}
+	return lines
+}
+
+func joinMarkdownList(items []string, emptyText string) string {
+	if len(items) == 0 {
+		return emptyText
+	}
+	return strings.Join(items, "<br>")
+}
+
+func markdownCell(value string) string {
+	value = strings.ReplaceAll(value, "|", `\|`)
+	value = strings.ReplaceAll(value, "\n", "<br>")
+	return value
+}
+
+func markdownText(value string) string {
+	return strings.ReplaceAll(value, "|", `\|`)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
 }

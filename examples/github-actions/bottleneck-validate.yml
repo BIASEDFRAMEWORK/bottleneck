@@ -1,0 +1,43 @@
+name: bottleneck validate
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: bottleneck environment to validate
+        default: production
+        required: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build bottleneck
+        run: go build -o bottleneck .
+
+      - name: Validate framework evidence
+        env:
+          BOTTLENECK_ENV: ${{ github.event.inputs.environment || 'production' }}
+        run: |
+          set +e
+          ./bottleneck validate --env="$BOTTLENECK_ENV" --strict --github-annotations
+          VALIDATE_EXIT=$?
+          ./bottleneck scorecard --env="$BOTTLENECK_ENV" --view=governance --format=markdown > bottleneck-scorecard.md
+          SCORECARD_EXIT=$?
+          cat bottleneck-scorecard.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$VALIDATE_EXIT" -ne 0 ]; then
+            exit "$VALIDATE_EXIT"
+          fi
+          if [ "$SCORECARD_EXIT" -ne 0 ]; then
+            exit "$SCORECARD_EXIT"
+          fi

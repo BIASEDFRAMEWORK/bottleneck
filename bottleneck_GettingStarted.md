@@ -1,6 +1,6 @@
-# Getting Started With BIASED
+# Getting Started With bottleneck
 
-This guide helps you initialize and validate a project with the `biased` CLI.
+This guide helps you initialize and validate a project with the `bottleneck` CLI.
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ go run . init
 go run . validate
 ```
 
-## 2. Initialize BIASED Artifacts
+## 2. Initialize Framework Artifacts
 
 Run:
 
@@ -41,7 +41,7 @@ go run . init
 This creates:
 
 ```text
-biased/
+bottleneck/
   config.yaml
   behavior/
   intent/
@@ -63,7 +63,7 @@ It also creates starter artifacts for each capability.
 Edit:
 
 ```text
-biased/behavior/behavior-spec.md
+bottleneck/behavior/behavior-spec.md
 ```
 
 Required sections:
@@ -80,7 +80,7 @@ Use this file to describe what the system must do and what it must never do.
 Edit:
 
 ```text
-biased/intent/intent.md
+bottleneck/intent/intent.md
 ```
 
 Required sections:
@@ -98,7 +98,7 @@ Use this file to define why the system exists and how success is measured.
 Edit:
 
 ```text
-biased/design/architecture.md
+bottleneck/design/architecture.md
 ```
 
 The file must not be empty and must contain at least one Markdown heading.
@@ -108,13 +108,13 @@ The file must not be empty and must contain at least one Markdown heading.
 BDD scenarios live in:
 
 ```text
-biased/assurance/features/
+bottleneck/assurance/features/
 ```
 
-BIASED does not run these tests. Run them with your preferred BDD framework, then write the result summary to:
+bottleneck does not run these tests. Run them with your preferred BDD framework, then write the result summary to:
 
 ```text
-biased/assurance/results.json
+bottleneck/assurance/results.json
 ```
 
 Expected schema:
@@ -128,14 +128,14 @@ Expected schema:
 }
 ```
 
-BIASED computes accuracy automatically as `scenarios_passed / scenarios_total`.
+bottleneck computes accuracy automatically as `scenarios_passed / scenarios_total`.
 
 ### Configuration
 
 Environment thresholds live in:
 
 ```text
-biased/config.yaml
+bottleneck/config.yaml
 ```
 
 Use the default environment or select one explicitly:
@@ -160,7 +160,7 @@ Current built-in environments:
 Edit:
 
 ```text
-biased/security/guardrails.json
+bottleneck/security/guardrails.json
 ```
 
 Expected schema:
@@ -176,7 +176,7 @@ Expected schema:
 Edit:
 
 ```text
-biased/execution/telemetry.json
+bottleneck/execution/telemetry.json
 ```
 
 Expected schema:
@@ -302,20 +302,20 @@ Use `scorecard` when you want a compact summary of:
 
 ## Recommended Workflow
 
-1. Run `biased init`.
+1. Run `bottleneck init`.
 2. Define Intent, Behavior, and Design artifacts.
-3. Write BDD scenarios under `biased/assurance/features/`.
+3. Write BDD scenarios under `bottleneck/assurance/features/`.
 4. Run your external BDD framework.
-5. Export BDD results to `biased/assurance/results.json`.
-6. Select the target environment in `biased/config.yaml` or with `--env`.
+5. Export BDD results to `bottleneck/assurance/results.json`.
+6. Select the target environment in `bottleneck/config.yaml` or with `--env`.
 7. Update security and execution artifacts.
-8. Run `biased validate`.
-9. Run `biased explain` or `biased scorecard` to understand ownership and bottlenecks.
+8. Run `bottleneck validate`.
+9. Run `bottleneck explain` or `bottleneck scorecard` to understand ownership and bottlenecks.
 10. Fix the primary bottleneck if the system fails.
 
 ## Principle
 
-BIASED validates outcomes, not implementation.
+bottleneck validates outcomes, not implementation.
 
 It enforces:
 

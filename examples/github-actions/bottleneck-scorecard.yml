@@ -1,0 +1,36 @@
+name: bottleneck scorecard
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: bottleneck environment to score
+        default: production
+        required: true
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build bottleneck
+        run: go build -o bottleneck .
+
+      - name: Generate scorecard
+        env:
+          BOTTLENECK_ENV: ${{ github.event.inputs.environment || 'production' }}
+        run: |
+          set +e
+          ./bottleneck scorecard --env="$BOTTLENECK_ENV" --view=governance --format=markdown > bottleneck-scorecard.md
+          SCORECARD_EXIT=$?
+          cat bottleneck-scorecard.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$SCORECARD_EXIT"

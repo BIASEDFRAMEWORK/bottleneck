@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"biased/internal/models"
+	"bottleneck/internal/models"
 )
 
 func TestRenderMapsAssuranceFailure(t *testing.T) {
@@ -91,7 +91,43 @@ func TestRenderIncludesSummaryEvidenceAndActions(t *testing.T) {
 		"accuracy below threshold",
 		"accuracy: 0.90 (threshold: 0.95)",
 		"Recommended Next Actions:",
-		"Inspect biased/assurance/results.json and confirm the scenario counts are correct.",
+		"Inspect bottleneck/assurance/results.json and confirm the scenario counts are correct.",
+	}
+
+	for _, expected := range expectedSubstrings {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in output:\n%s", expected, output)
+		}
+	}
+}
+
+func TestRenderSurfacesContentQualityWarningDetails(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      models.StatusWarning,
+		PrimaryBottleneck: "Behavior",
+		Results: []models.ValidationResult{{
+			Capability: "Behavior",
+			Status:     models.StatusWarning,
+			Message:    "content quality warnings detected",
+			Details: []string{
+				`bottleneck/behavior/behavior-spec.md section "Expected Behavior" still contains placeholder content`,
+			},
+		}},
+	}
+
+	output, err := Render(result, "")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expectedSubstrings := []string{
+		"System Status: WARNING",
+		"Primary Bottleneck: Behavior",
+		"Status: WARNING",
+		"content quality warnings detected",
+		`bottleneck/behavior/behavior-spec.md section "Expected Behavior" still contains placeholder content`,
+		"Treat this warning as an early signal and correct it before it becomes a failing bottleneck.",
 	}
 
 	for _, expected := range expectedSubstrings {

@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"biased/internal/config"
-	"biased/internal/metrics"
-	"biased/internal/models"
+	"bottleneck/internal/config"
+	"bottleneck/internal/metrics"
+	"bottleneck/internal/models"
 )
 
 type AssuranceValidator struct {

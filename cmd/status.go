@@ -12,7 +12,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Print the current system status",
 	Run: func(cmd *cobra.Command, args []string) {
-		if biasedRootExists(".") {
+		if bottleneckRootExists(".") {
 			fmt.Println("System initialized")
 			return
 		}
@@ -25,7 +25,7 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 }
 
-func biasedRootExists(basePath string) bool {
-	info, err := os.Stat(filepath.Join(basePath, "biased"))
+func bottleneckRootExists(basePath string) bool {
+	info, err := os.Stat(filepath.Join(basePath, "bottleneck"))
 	return err == nil && info.IsDir()
 }

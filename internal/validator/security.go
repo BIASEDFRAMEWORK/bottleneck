@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"biased/internal/models"
+	"bottleneck/internal/models"
 )
 
 type SecurityValidator struct {
@@ -49,11 +49,17 @@ func validateSecurity(rootPath string) models.ValidationResult {
 			Capability: "Security",
 			Status:     models.StatusFail,
 			Message:    "violations detected",
+			Details: []string{
+				formatIntDetail("violations", *data.Violations, 0, "allowed"),
+			},
 		}
 	}
 
 	return models.ValidationResult{
 		Capability: "Security",
 		Status:     models.StatusPass,
+		Details: []string{
+			formatIntDetail("violations", *data.Violations, 0, "allowed"),
+		},
 	}
 }

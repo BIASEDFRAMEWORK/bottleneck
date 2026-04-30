@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"biased/internal/config"
-	"biased/internal/models"
+	"bottleneck/internal/config"
+	"bottleneck/internal/models"
 )
 
 type ExecutionValidator struct {
@@ -47,11 +47,17 @@ func validateExecution(rootPath string, cfg config.ExecutionConfig) models.Valid
 		}
 	}
 
+	details := []string{
+		formatFloatDetail("error_rate", *data.ErrorRate, cfg.MaxErrorRate, "max"),
+		formatFloatDetail("adoption_rate", *data.AdoptionRate, cfg.MinAdoption, "min"),
+	}
+
 	if *data.ErrorRate > cfg.MaxErrorRate {
 		return models.ValidationResult{
 			Capability: "Execution",
 			Status:     models.StatusFail,
 			Message:    "error rate above threshold",
+			Details:    details,
 		}
 	}
 
@@ -60,11 +66,13 @@ func validateExecution(rootPath string, cfg config.ExecutionConfig) models.Valid
 			Capability: "Execution",
 			Status:     models.StatusWarning,
 			Message:    "low adoption",
+			Details:    details,
 		}
 	}
 
 	return models.ValidationResult{
 		Capability: "Execution",
 		Status:     models.StatusPass,
+		Details:    details,
 	}
 }

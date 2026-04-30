@@ -40,7 +40,7 @@ Defines what the system must do and how it is expected to behave.
 - Ambiguity Rate (<10%)
 
 **Artifacts**
-`/biased/behavior/behavior-spec.md`
+`/bottleneck/behavior/behavior-spec.md`
 
 **Owner**
 Product + Engineering
@@ -63,7 +63,7 @@ Defines why the system exists, the outcomes it must achieve, and constraints.
 - Constraint Coverage (>90%)
 
 **Artifacts**
-`/biased/intent/intent.md`
+`/bottleneck/intent/intent.md`
 
 **Owner**
 Product + Leadership
@@ -86,7 +86,7 @@ Defines how the system works (architecture, interactions, system composition).
 - Change Impact Visibility (>80%)
 
 **Artifacts**
-`/biased/design/architecture.md`
+`/bottleneck/design/architecture.md`
 
 **Owner**
 Engineering
@@ -110,8 +110,8 @@ Continuously proves system behavior matches intent using externally executed BDD
 - Drift Detection (within threshold)
 
 **Artifacts**
-`/biased/assurance/features/*.feature`
-`/biased/assurance/results.json`
+`/bottleneck/assurance/features/*.feature`
+`/bottleneck/assurance/results.json`
 
 **Owner**
 Engineering + QA
@@ -134,7 +134,7 @@ Ensures system safety, compliance, and governance.
 - Audit Completeness (100%)
 
 **Artifacts**
-`/biased/security/guardrails.json`
+`/bottleneck/security/guardrails.json`
 
 **Owner**
 Security + Engineering
@@ -159,7 +159,7 @@ Measures real-world performance and feeds results back into the system.
 - Production Drift (minimal)
 
 **Artifacts**
-`/biased/execution/telemetry.json`
+`/bottleneck/execution/telemetry.json`
 
 **Owner**
 Operations + Product + Engineering
@@ -175,7 +175,7 @@ Operations + Product + Engineering
 
 BIASED resolves validation thresholds from a single configuration file:
 
-`/biased/config.yaml`
+`/bottleneck/config.yaml`
 
 The model is environment-aware:
 
@@ -201,7 +201,7 @@ environments:
 
 This keeps developer friction low:
 
-- Developers produce one assurance artifact: `/biased/assurance/results.json`
+- Developers produce one assurance artifact: `/bottleneck/assurance/results.json`
 - The system computes metrics from that file
 - The selected environment determines the thresholds that apply
 
@@ -236,9 +236,9 @@ For `production`, the effective assurance threshold is currently:
 
 A system FAILS if:
 
-- Missing `/biased/behavior/behavior-spec.md`
-- Missing `/biased/intent/intent.md`
-- Missing or invalid `/biased/config.yaml`
+- Missing `/bottleneck/behavior/behavior-spec.md`
+- Missing `/bottleneck/intent/intent.md`
+- Missing or invalid `/bottleneck/config.yaml`
 - Assurance failed scenarios exceed the resolved `max_failures`
 - Assurance computed accuracy falls below the resolved `min_accuracy`
 - Execution `error_rate` exceeds the resolved `max_error_rate`
@@ -266,18 +266,18 @@ BIASED is enforced through:
 
 - Git-based artifacts
 - Environment-aware CLI validation
-- Read-only interpretation commands (`biased explain`, `biased scorecard`)
+- Read-only interpretation commands (`bottleneck explain`, `bottleneck scorecard`)
 - CI/CD integration
-- External BDD runners writing `/biased/assurance/results.json`
+- External BDD runners writing `/bottleneck/assurance/results.json`
 - Threshold inheritance from `default` to the selected environment
 
 ## 9. Operating Model
 
 Behavior -> Intent -> Design -> Assurance -> Security -> Execution -> Behavior
 
-`biased validate --env=<environment>` resolves configuration, computes metrics from artifacts, and determines whether the system remains valid.
+`bottleneck validate --env=<environment>` resolves configuration, computes metrics from artifacts, and determines whether the system remains valid.
 
-`biased explain` and `biased scorecard` do not change system state. They interpret the current validation state so teams can understand ownership, bottlenecks, and next actions without mutating artifacts.
+`bottleneck explain` and `bottleneck scorecard` do not change system state. They interpret the current validation state so teams can understand ownership, bottlenecks, and next actions without mutating artifacts.
 
 Execution reveals truth. Truth updates Behavior and Intent.
 
@@ -343,7 +343,7 @@ Execution → Assurance → Behavior/Design update → redeploy → repeat
 
 - FAIL if `scenarios_failed` exceeds the resolved `max_failures`
 - FAIL if computed accuracy falls below the resolved `min_accuracy`
-- Thresholds are resolved from `/biased/config.yaml` for the selected environment
+- Thresholds are resolved from `/bottleneck/config.yaml` for the selected environment
 
 ### Principle
 
@@ -410,10 +410,10 @@ Execution → Cost measurement → Design adjustment → Assurance → repeat
 
 Loops are enforced through:
 
-- Continuous validation (`biased validate`)
+- Continuous validation (`bottleneck validate`)
 - CI/CD integration
 - Execution telemetry
-- Environment-aware thresholds from `/biased/config.yaml`
+- Environment-aware thresholds from `/bottleneck/config.yaml`
 
 ---
 

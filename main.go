@@ -1,6 +1,6 @@
 package main
 
-import "biased/cmd"
+import "bottleneck/cmd"
 
 func main() {
 	cmd.Execute()

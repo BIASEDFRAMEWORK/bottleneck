@@ -8,9 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "biased",
-	Short:         "BIASED CLI",
-	Long:          "A CLI for initializing and validating systems against the BIASED framework.",
+	Use:           "bottleneck",
+	Short:         "bottleneck SDLC scorecard",
+	Long:          "bottleneck is an SDLC scorecard application that examines framework evidence artifacts.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

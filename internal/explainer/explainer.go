@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"biased/internal/models"
+	"bottleneck/internal/models"
 )
 
 type capabilityMetadata struct {
@@ -47,7 +47,7 @@ var metadataByCapability = map[string]capabilityMetadata{
 		bottleneck:   "Validation gaps",
 		whyItMatters: "Assurance proves the implemented system still behaves as intended using externally produced BDD results.",
 		nextActionBase: []string{
-			"Inspect biased/assurance/results.json and confirm the scenario counts are correct.",
+			"Inspect bottleneck/assurance/results.json and confirm the scenario counts are correct.",
 			"Fix failing scenarios or regenerate the external BDD results before promoting the system.",
 		},
 	},
@@ -69,12 +69,21 @@ var metadataByCapability = map[string]capabilityMetadata{
 			"Adjust delivery, UX, or rollout mechanics before the issue compounds in production.",
 		},
 	},
+	"Traceability": {
+		owner:        "Release Engineer",
+		bottleneck:   "Traceability gaps",
+		whyItMatters: "Traceability connects intent, behavior, assurance, security, and telemetry evidence so release decisions can be audited end to end.",
+		nextActionBase: []string{
+			"Inspect evidence IDs and Refs entries across the framework artifacts.",
+			"Run bottleneck trace <id> for the affected evidence ID and repair missing or orphaned links.",
+		},
+	},
 	"Config": {
 		owner:        "Execution Engineer",
 		bottleneck:   "Delivery friction",
 		whyItMatters: "Configuration selects the thresholds that interpret the same artifacts across environments and must resolve cleanly before validation can run.",
 		nextActionBase: []string{
-			"Repair biased/config.yaml so the default environment and overrides parse correctly.",
+			"Repair bottleneck/config.yaml so the default environment and overrides parse correctly.",
 			"Confirm the selected environment inherits the intended thresholds before re-running validation.",
 		},
 	},

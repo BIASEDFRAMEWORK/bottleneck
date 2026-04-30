@@ -5,22 +5,23 @@ import (
 	"path/filepath"
 	"strings"
 
-	"biased/internal/models"
+	"bottleneck/internal/models"
 )
 
 type BehaviorValidator struct {
 	rootPath string
+	strict   bool
 }
 
-func NewBehaviorValidator(rootPath string) *BehaviorValidator {
-	return &BehaviorValidator{rootPath: rootPath}
+func NewBehaviorValidator(rootPath string, strict bool) *BehaviorValidator {
+	return &BehaviorValidator{rootPath: rootPath, strict: strict}
 }
 
 func (v *BehaviorValidator) Validate() []models.ValidationResult {
-	return []models.ValidationResult{validateBehavior(v.rootPath)}
+	return []models.ValidationResult{validateBehavior(v.rootPath, v.strict)}
 }
 
-func validateBehavior(rootPath string) models.ValidationResult {
+func validateBehavior(rootPath string, strict bool) models.ValidationResult {
 	path := filepath.Join(rootPath, "behavior", "behavior-spec.md")
 
 	content, err := os.ReadFile(path)
@@ -49,8 +50,20 @@ func validateBehavior(rootPath string) models.ValidationResult {
 		}
 	}
 
+	details := markdownSectionContentDetails(rootPath, "behavior/behavior-spec.md", text, []sectionContentRequirement{
+		{section: "Expected Behavior", placeholder: placeholderIntendedBehavior},
+		{section: "Unacceptable Behavior", placeholder: placeholderUnacceptableBehavior},
+	})
+	if len(details) > 0 {
+		return contentQualityResult("Behavior", details, strict)
+	}
+
 	return models.ValidationResult{
 		Capability: "Behavior",
 		Status:     models.StatusPass,
+		Details: []string{
+			contentQualityArtifactPath(rootPath, "behavior/behavior-spec.md") + ` section "Expected Behavior" contains non-placeholder content`,
+			contentQualityArtifactPath(rootPath, "behavior/behavior-spec.md") + ` section "Unacceptable Behavior" contains non-placeholder content`,
+		},
 	}
 }

@@ -2,21 +2,24 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
-	"biased/internal/explainer"
-	"biased/internal/validator"
+	"bottleneck/internal/explainer"
+	"bottleneck/internal/models"
+	"bottleneck/internal/validator"
 
 	"github.com/spf13/cobra"
 )
 
 var explainEnv string
 var explainCapability string
+var explainStrict bool
 
 var explainCmd = &cobra.Command{
 	Use:   "explain",
 	Short: "Explain the current validation state in human-readable form",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		engine := validator.NewEngine(".", explainEnv)
+		engine := validator.NewEngine(".", explainEnv, validator.WithStrictMode(explainStrict))
 		result := engine.Validate()
 
 		output, err := explainer.Render(result, explainCapability)
@@ -25,6 +28,10 @@ var explainCmd = &cobra.Command{
 		}
 
 		fmt.Println(output)
+		if result.SystemStatus == models.StatusFail {
+			os.Exit(1)
+		}
+
 		return nil
 	},
 }
@@ -32,5 +39,6 @@ var explainCmd = &cobra.Command{
 func init() {
 	explainCmd.Flags().StringVar(&explainEnv, "env", "default", "environment config to use")
 	explainCmd.Flags().StringVar(&explainCapability, "capability", "", "single capability to explain")
+	explainCmd.Flags().BoolVar(&explainStrict, "strict", false, "treat placeholder and insufficient content as failures")
 	rootCmd.AddCommand(explainCmd)
 }

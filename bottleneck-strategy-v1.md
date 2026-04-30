@@ -34,7 +34,8 @@ A system is considered INVALID if any capability is missing or below threshold.
 **Definition**
 Defines what the system must do and how it is expected to behave.
 
-**Measurements**
+#### Capabilities - Measurements
+
 - Behavior Coverage (>90%)
 - Testability (>95%)
 - Ambiguity Rate (<10%)
@@ -45,7 +46,8 @@ Defines what the system must do and how it is expected to behave.
 **Owner**
 Product + Engineering
 
-**Triggers**
+#### Capabilities - Triggers
+
 - New feature
 - Unclear requirements
 - Validation failures
@@ -57,7 +59,8 @@ Product + Engineering
 **Definition**
 Defines why the system exists, the outcomes it must achieve, and constraints.
 
-**Measurements**
+#### Intent - Measurements
+
 - Outcome Alignment (100%)
 - Success Criteria Coverage (100%)
 - Constraint Coverage (>90%)
@@ -68,7 +71,8 @@ Defines why the system exists, the outcomes it must achieve, and constraints.
 **Owner**
 Product + Leadership
 
-**Triggers**
+#### Intent - Triggers
+
 - New initiative
 - Misalignment with business outcomes
 - Low adoption
@@ -80,7 +84,8 @@ Product + Leadership
 **Definition**
 Defines how the system works (architecture, interactions, system composition).
 
-**Measurements**
+#### Design - Measurements
+
 - Design Coverage (>90%)
 - Interaction Coverage (>85%)
 - Change Impact Visibility (>80%)
@@ -91,7 +96,8 @@ Defines how the system works (architecture, interactions, system composition).
 **Owner**
 Engineering
 
-**Triggers**
+#### Design - Triggers
+
 - Architecture change
 - Scaling issues
 - Missing traceability
@@ -103,7 +109,8 @@ Engineering
 **Definition**
 Continuously proves system behavior matches intent using externally executed BDD scenarios and a single results artifact.
 
-**Measurements**
+#### Assurance - Measurements
+
 - Behavioral Accuracy (computed from `scenarios_passed / scenarios_total`)
 - Defect Escape Rate (<5%)
 - Edge Case Coverage (>90%)
@@ -116,7 +123,8 @@ Continuously proves system behavior matches intent using externally executed BDD
 **Owner**
 Engineering + QA
 
-**Triggers**
+#### Assurance - Triggers
+
 - Failing BDD results
 - New edge cases
 - Production defects
@@ -128,7 +136,8 @@ Engineering + QA
 **Definition**
 Ensures system safety, compliance, and governance.
 
-**Measurements**
+#### Security - Measurements
+
 - Policy Violations (0)
 - Guardrail Coverage (>95%)
 - Audit Completeness (100%)
@@ -139,7 +148,8 @@ Ensures system safety, compliance, and governance.
 **Owner**
 Security + Engineering
 
-**Triggers**
+#### Security - Triggers
+
 - Policy updates
 - Security incidents
 - Pre-release checks
@@ -151,7 +161,8 @@ Security + Engineering
 **Definition**
 Measures real-world performance and feeds results back into the system.
 
-**Measurements**
+#### Execution - Measurements
+
 - Adoption Rate (context-specific)
 - Task Success Rate (>90%)
 - Reliability (SLA)
@@ -164,7 +175,8 @@ Measures real-world performance and feeds results back into the system.
 **Owner**
 Operations + Product + Engineering
 
-**Triggers**
+#### Execution - Triggers
+
 - Production release
 - Performance issues
 - User feedback
@@ -283,7 +295,7 @@ Execution reveals truth. Truth updates Behavior and Intent.
 
 ## 10. Loops (Continuous System Validation)
 
-### Purpose
+### Purpose of Loops
 
 Loops define how the system continuously validates and improves itself after deployment.
 
@@ -295,7 +307,7 @@ This aligns with modern software practices where systems are **continuous, cycli
 
 ---
 
-## Core Principle
+## Loops Design Principle
 
 - Workflows define how features are created  
 - Capabilities define what must exist  
@@ -325,27 +337,27 @@ After deployment, the feature enters continuous loops:
 
 ## 10.1 Assurance Loop (Primary Loop)
 
-### Definition
+### Assurance Loop: Definition
 
 Continuously validates that system behavior matches defined expectations.
 
-### Flow
+### Assurance Loop: Flow
 
 Execution → Assurance → Behavior/Design update → redeploy → repeat
 
-### Rules
+### Assurance Loop: Rules
 
 - BDD scenarios must continuously pass
 - Any failure indicates system drift
 - Failures require immediate correction
 
-### Validation
+### Assurance Loop: Validation
 
 - FAIL if `scenarios_failed` exceeds the resolved `max_failures`
 - FAIL if computed accuracy falls below the resolved `min_accuracy`
 - Thresholds are resolved from `/bottleneck/config.yaml` for the selected environment
 
-### Principle
+### Assurance Loop: Principle
 
 > If Assurance fails in production, the system is invalid.
 
@@ -353,27 +365,27 @@ Execution → Assurance → Behavior/Design update → redeploy → repeat
 
 ## 10.2 Execution Loop
 
-### Definition
+### Execution Loop: Definition
 
 Continuously measures real-world system performance and usage.
 
-### Flow
+### Execution Loop: Flow
 
 Execution → Metrics → Analysis → Behavior/Intent refinement → repeat
 
-### Measurements
+### Execution Loop: Measurements
 
 - Adoption rate
 - Task success rate
 - Error rate
 - Latency
 
-### Validation
+### Execution Loop: Validation
 
 - FAIL if `error_rate` exceeds the resolved `max_error_rate`
 - WARNING if `adoption_rate` falls below the resolved `min_adoption`
 
-### Principle
+### Execution Loop: Principle
 
 > Execution reveals truth.
 
@@ -381,26 +393,26 @@ Execution → Metrics → Analysis → Behavior/Intent refinement → repeat
 
 ## 10.3 Cost Loop
 
-### Definition
+### Cost Loop: Definition
 
 Continuously evaluates and optimizes system cost.
 
-### Flow
+### Cost Loop: Flow
 
 Execution → Cost measurement → Design adjustment → Assurance → repeat
 
-### Measurements
+### Cost Loop: Measurements
 
 - Cost per request
 - Total system cost
 - Cost trends
 
-### Rules
+### Cost Loop: Rules
 
 - FAIL if cost exceeds defined thresholds
 - WARNING if cost trends upward
 
-### Principle
+### Cost Loop: Principle
 
 > Cost is a constraint applied continuously, not a one-time decision.
 

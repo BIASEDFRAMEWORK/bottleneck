@@ -38,6 +38,13 @@ func init() {
 			return runIngestCommand("codeql")
 		},
 	}
+	sarifCmd := &cobra.Command{
+		Use:   "sarif",
+		Short: "Ingest SARIF security scan results",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runIngestCommand("sarif")
+		},
+	}
 	testSummaryCmd := &cobra.Command{
 		Use:   "test-summary",
 		Short: "Ingest generic test summary JSON",
@@ -53,7 +60,7 @@ func init() {
 		},
 	}
 
-	for _, command := range []*cobra.Command{cucumberCmd, codeqlCmd, testSummaryCmd, telemetryCmd} {
+	for _, command := range []*cobra.Command{cucumberCmd, codeqlCmd, sarifCmd, testSummaryCmd, telemetryCmd} {
 		command.Flags().StringVar(&ingestFilePath, "file", "", "input file to ingest")
 		command.Flags().StringVar(&ingestOutPath, "out", "", "explicit output artifact path")
 		command.Flags().BoolVar(&ingestDryRun, "dry-run", false, "parse and print normalized evidence without writing files")
@@ -81,7 +88,7 @@ func runIngestCommand(kind string) error {
 		switch kind {
 		case "cucumber", "test-summary":
 			outputPath = "bottleneck/assurance/results.json"
-		case "codeql":
+		case "codeql", "sarif":
 			outputPath = "bottleneck/security/guardrails.json"
 		case "telemetry":
 			outputPath = "bottleneck/execution/telemetry.json"
@@ -97,6 +104,8 @@ func runIngestCommand(kind string) error {
 		summary, err = ingest.IngestCucumber(rootPath, ingestFilePath, outputPath, ingestMerge, ingestDryRun)
 	case "codeql":
 		summary, err = ingest.IngestCodeQL(rootPath, ingestFilePath, outputPath, ingestMerge, ingestDryRun)
+	case "sarif":
+		summary, err = ingest.IngestSARIF(rootPath, ingestFilePath, outputPath, ingestMerge, ingestDryRun)
 	case "test-summary":
 		summary, err = ingest.IngestTestSummary(rootPath, ingestFilePath, outputPath, ingestMerge, ingestDryRun)
 	case "telemetry":

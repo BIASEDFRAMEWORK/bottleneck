@@ -1,0 +1,15 @@
+[
+  {
+    "name": "Unmapped workflow",
+    "scenarios": [
+      {
+        "name": "Scenario without behavior tag",
+        "type": "scenario",
+        "tags": [],
+        "steps": [
+          {"result": {"status": "passed"}}
+        ]
+      }
+    ]
+  }
+]

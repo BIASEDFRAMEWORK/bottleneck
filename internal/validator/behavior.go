@@ -50,20 +50,22 @@ func validateBehavior(rootPath string, strict bool) models.ValidationResult {
 		}
 	}
 
-	details := markdownSectionContentDetails(rootPath, "behavior/behavior-spec.md", text, []sectionContentRequirement{
+	requirements := []sectionContentRequirement{
 		{section: "Expected Behavior", placeholder: placeholderIntendedBehavior},
 		{section: "Unacceptable Behavior", placeholder: placeholderUnacceptableBehavior},
-	})
-	if len(details) > 0 {
-		return contentQualityResult("Behavior", details, strict)
+	}
+	quality := evaluateMarkdownEvidenceQuality(rootPath, "behavior/behavior-spec.md", "Behavior", text, requirements)
+	if status, message := qualityStatus("Behavior", quality, strict); status != models.StatusPass {
+		result := contentQualityResultWithQuality("Behavior", quality, strict)
+		result.Status = status
+		result.Message = message
+		return result
 	}
 
 	return models.ValidationResult{
-		Capability: "Behavior",
-		Status:     models.StatusPass,
-		Details: []string{
-			contentQualityArtifactPath(rootPath, "behavior/behavior-spec.md") + ` section "Expected Behavior" contains non-placeholder content`,
-			contentQualityArtifactPath(rootPath, "behavior/behavior-spec.md") + ` section "Unacceptable Behavior" contains non-placeholder content`,
-		},
+		Capability:      "Behavior",
+		Status:          models.StatusPass,
+		Details:         qualityPassDetails(rootPath, "behavior/behavior-spec.md", []string{"Expected Behavior", "Unacceptable Behavior"}),
+		EvidenceQuality: quality,
 	}
 }

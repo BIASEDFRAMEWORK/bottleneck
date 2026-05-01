@@ -62,13 +62,17 @@ func TestRenderTextIncludesSummaryAndRowData(t *testing.T) {
 	}
 
 	expected := []string{
-		"bottleneck SDLC Scorecard",
+		"Bottleneck Scorecard",
 		"Environment: production",
 		"System Status: FAIL",
 		"Primary Bottleneck: Assurance",
-		"Diagnosis:",
+		"Overall Diagnosis:",
+		"Category Gauges:",
+		"Assurance",
+		"<-- primary bottleneck",
 		"Why:",
-		"Next Action: Fix failing tests or add passing assurance evidence until accuracy meets the selected threshold.",
+		"Next action:",
+		"Fix failing tests or add passing assurance evidence until accuracy meets the selected threshold.",
 		"Assurance",
 		"Assurance Engineer",
 		"Validation gaps",
@@ -77,6 +81,49 @@ func TestRenderTextIncludesSummaryAndRowData(t *testing.T) {
 		"The system is not valid for production. Primary ownership starts with Assurance Engineer.",
 	}
 
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+}
+
+func TestGaugeHelperRendersAndClampsScores(t *testing.T) {
+	tests := []struct {
+		score    int
+		expected string
+	}{
+		{score: -10, expected: "[----------]"},
+		{score: 0, expected: "[----------]"},
+		{score: 20, expected: "[##--------]"},
+		{score: 60, expected: "[######----]"},
+		{score: 80, expected: "[########--]"},
+		{score: 100, expected: "[##########]"},
+		{score: 120, expected: "[##########]"},
+	}
+
+	for _, tt := range tests {
+		if actual := gauge(tt.score, 10); actual != tt.expected {
+			t.Fatalf("expected gauge(%d) %q, got %q", tt.score, tt.expected, actual)
+		}
+	}
+}
+
+func TestRenderTextIncludesCategoryGaugeAndWeakestMarker(t *testing.T) {
+	output, err := Render(sampleWarningResult(), "text")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expected := []string{
+		"Category Gauges:",
+		"Behavior",
+		"[#####-----]  50",
+		"<-- primary bottleneck",
+		"Primary Bottleneck: Behavior",
+		"Why:",
+		"Next action:",
+	}
 	for _, substring := range expected {
 		if !strings.Contains(output, substring) {
 			t.Fatalf("expected %q in output:\n%s", substring, output)
@@ -129,6 +176,12 @@ func TestRenderJSONProducesValidJSON(t *testing.T) {
 	}
 	if decoded.EffectiveThresholds.Assurance.MinAccuracy != 0.95 {
 		t.Fatalf("expected min accuracy threshold in json, got %.2f", decoded.EffectiveThresholds.Assurance.MinAccuracy)
+	}
+	if decoded.EffectiveThresholds.Security.SARIF.MaxMedium != 5 {
+		t.Fatalf("expected SARIF medium threshold in json, got %d", decoded.EffectiveThresholds.Security.SARIF.MaxMedium)
+	}
+	if decoded.EffectiveThresholds.Execution.Telemetry.MaxAgeHours != 168 {
+		t.Fatalf("expected telemetry freshness threshold in json, got %d", decoded.EffectiveThresholds.Execution.Telemetry.MaxAgeHours)
 	}
 	if len(decoded.Capabilities) != 1 {
 		t.Fatalf("expected capability array, got %d", len(decoded.Capabilities))
@@ -189,6 +242,38 @@ func TestRenderSurfacesContentQualityDetailsInTextAndJSON(t *testing.T) {
 	}
 	if !containsString(decoded.Capabilities[0].MissingEvidence, `bottleneck/intent/intent.md section "Outcomes" needs real evidence`) {
 		t.Fatalf("expected content quality detail in json missing evidence, got %#v", decoded.Capabilities[0].MissingEvidence)
+	}
+}
+
+func TestScorecardIncludesEvidenceQualityMissingAndScoreImpacts(t *testing.T) {
+	missing := "Add an INTENT-* heading such as ### INTENT-001: ..."
+	impact := models.ScoreImpact{
+		Reason: "bottleneck/intent/intent.md does not define an INTENT-* evidence ID",
+		Delta:  -20,
+	}
+	result := models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      models.StatusWarning,
+		PrimaryBottleneck: "Intent",
+		Results: []models.ValidationResult{{
+			Capability: "Intent",
+			Status:     models.StatusWarning,
+			Message:    "intent evidence quality is weak",
+			EvidenceQuality: models.EvidenceQuality{
+				Score:        80,
+				Missing:      []string{missing},
+				ScoreImpacts: []models.ScoreImpact{impact},
+			},
+		}},
+	}
+
+	card := Build(result)
+	capability := card.Capabilities[0]
+	if !containsString(capability.MissingEvidence, missing) {
+		t.Fatalf("expected evidence-quality missing evidence, got %#v", capability.MissingEvidence)
+	}
+	if len(capability.ScoreImpacts) != 1 || capability.ScoreImpacts[0] != impact {
+		t.Fatalf("expected score impact in scorecard, got %#v", capability.ScoreImpacts)
 	}
 }
 
@@ -346,6 +431,10 @@ func TestRenderTextIncludesThresholdsAndReleaseRecommendation(t *testing.T) {
 		"assurance.max_failures: 0",
 		"execution.max_error_rate: 0.05",
 		"execution.min_adoption: 0.50",
+		"execution.telemetry.max_age_hours: 168",
+		"execution.telemetry.min_deployments_per_week: 1.00",
+		"security.sarif.max_high: 0",
+		"security.sarif.max_medium: 5",
 	}
 
 	for _, substring := range expected {
@@ -594,6 +683,24 @@ func sampleThresholds() models.EffectiveThresholds {
 		Execution: models.ExecutionThresholds{
 			MaxErrorRate: 0.05,
 			MinAdoption:  0.50,
+			Telemetry: models.TelemetryThresholds{
+				MaxAgeHours:           168,
+				MinDeploymentsPerWeek: 1,
+				MaxChangeFailureRate:  0.15,
+				MaxErrorRate:          0.05,
+				MaxUserOverrideRate:   0.10,
+				MinAdoptionRate:       0.50,
+				MaxBudgetVariance:     0.20,
+			},
+		},
+		Security: models.SecurityThresholds{
+			SARIF: models.SARIFThresholds{
+				MaxCritical:           0,
+				MaxHigh:               0,
+				MaxMedium:             5,
+				MaxLow:                20,
+				FailOnUnknownSeverity: false,
+			},
 		},
 	}
 }

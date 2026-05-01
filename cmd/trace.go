@@ -13,12 +13,21 @@ import (
 var traceEnv string
 var traceFormat string
 var traceStrict bool
+var traceID string
 
 var traceCmd = &cobra.Command{
-	Use:   "trace <id>",
+	Use:   "trace [id]",
 	Short: "Trace evidence links for a framework evidence ID",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		queryID := traceID
+		if queryID == "" && len(args) > 0 {
+			queryID = args[0]
+		}
+		if queryID == "" {
+			return fmt.Errorf("trace id required; use --id INTENT-001 or pass an ID argument")
+		}
+
 		graph, err := traceability.Build(filepath.Join(".", "bottleneck"), traceability.Options{
 			Environment: traceEnv,
 			Strict:      traceStrict,
@@ -27,7 +36,7 @@ var traceCmd = &cobra.Command{
 			return err
 		}
 
-		result, err := graph.Trace(args[0])
+		result, err := graph.Trace(queryID)
 		if err != nil {
 			return err
 		}
@@ -50,6 +59,7 @@ var traceCmd = &cobra.Command{
 }
 
 func init() {
+	traceCmd.Flags().StringVar(&traceID, "id", "", "evidence ID to trace")
 	traceCmd.Flags().StringVar(&traceEnv, "env", "default", "environment config to use")
 	traceCmd.Flags().StringVar(&traceFormat, "format", "text", "output format: text or json")
 	traceCmd.Flags().BoolVar(&traceStrict, "strict", false, "treat traceability warnings as failures where applicable")

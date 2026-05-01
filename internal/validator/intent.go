@@ -43,22 +43,23 @@ func validateIntent(rootPath string, strict bool) models.ValidationResult {
 		}
 	}
 
-	details := markdownSectionContentDetails(rootPath, "intent/intent.md", text, []sectionContentRequirement{
+	requirements := []sectionContentRequirement{
 		{section: "Outcomes", placeholder: placeholderRequiredOutcomes},
 		{section: "Constraints", placeholder: placeholderSystemConstraints},
 		{section: "Success Criteria", placeholder: placeholderSuccessCriteria},
-	})
-	if len(details) > 0 {
-		return contentQualityResult("Intent", details, strict)
+	}
+	quality := evaluateMarkdownEvidenceQuality(rootPath, "intent/intent.md", "Intent", text, requirements)
+	if status, message := qualityStatus("Intent", quality, strict); status != models.StatusPass {
+		result := contentQualityResultWithQuality("Intent", quality, strict)
+		result.Status = status
+		result.Message = message
+		return result
 	}
 
 	return models.ValidationResult{
-		Capability: "Intent",
-		Status:     models.StatusPass,
-		Details: []string{
-			contentQualityArtifactPath(rootPath, "intent/intent.md") + ` section "Outcomes" contains non-placeholder content`,
-			contentQualityArtifactPath(rootPath, "intent/intent.md") + ` section "Constraints" contains non-placeholder content`,
-			contentQualityArtifactPath(rootPath, "intent/intent.md") + ` section "Success Criteria" contains non-placeholder content`,
-		},
+		Capability:      "Intent",
+		Status:          models.StatusPass,
+		Details:         qualityPassDetails(rootPath, "intent/intent.md", []string{"Outcomes", "Constraints", "Success Criteria"}),
+		EvidenceQuality: quality,
 	}
 }

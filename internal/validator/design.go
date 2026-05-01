@@ -49,16 +49,21 @@ func validateDesign(rootPath string, strict bool) models.ValidationResult {
 		}
 	}
 
-	details := markdownDocumentContentDetails(rootPath, "design/architecture.md", "Architecture", text, placeholderSystemArchitecture)
-	if len(details) > 0 {
-		return contentQualityResult("Design", details, strict)
+	requirements := []sectionContentRequirement{
+		{section: "Architecture", placeholder: placeholderSystemArchitecture},
+	}
+	quality := evaluateMarkdownEvidenceQuality(rootPath, "design/architecture.md", "Design", text, requirements)
+	if status, message := qualityStatus("Design", quality, strict); status != models.StatusPass {
+		result := contentQualityResultWithQuality("Design", quality, strict)
+		result.Status = status
+		result.Message = message
+		return result
 	}
 
 	return models.ValidationResult{
-		Capability: "Design",
-		Status:     models.StatusPass,
-		Details: []string{
-			contentQualityArtifactPath(rootPath, "design/architecture.md") + ` section "Architecture" contains non-placeholder content`,
-		},
+		Capability:      "Design",
+		Status:          models.StatusPass,
+		Details:         qualityPassDetails(rootPath, "design/architecture.md", []string{"Architecture"}),
+		EvidenceQuality: quality,
 	}
 }

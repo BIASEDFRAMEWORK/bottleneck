@@ -63,15 +63,36 @@ type Options struct {
 }
 
 type TraceResult struct {
-	SchemaVersion string     `json:"schema_version"`
-	Environment   string     `json:"environment"`
-	Query         string     `json:"query"`
-	Node          Node       `json:"node"`
-	OutboundRefs  []string   `json:"outbound_refs"`
-	InboundRefs   []string   `json:"inbound_refs"`
-	Chains        [][]string `json:"chains"`
-	Warnings      []string   `json:"warnings"`
-	BrokenRefs    []string   `json:"broken_refs"`
+	SchemaVersion    string         `json:"schema_version"`
+	Environment      string         `json:"environment"`
+	Query            string         `json:"query"`
+	ID               string         `json:"id"`
+	Kind             string         `json:"kind"`
+	Found            bool           `json:"found"`
+	Node             Node           `json:"node"`
+	OutboundRefs     []string       `json:"outbound_refs"`
+	InboundRefs      []string       `json:"inbound_refs"`
+	Chains           [][]string     `json:"chains"`
+	RelatedIntent    []EvidenceLink `json:"related_intent,omitempty"`
+	RelatedBehavior  []EvidenceLink `json:"related_behavior,omitempty"`
+	RelatedDesign    []EvidenceLink `json:"related_design,omitempty"`
+	RelatedAssurance []EvidenceLink `json:"related_assurance,omitempty"`
+	RelatedSecurity  []EvidenceLink `json:"related_security,omitempty"`
+	RelatedExecution []EvidenceLink `json:"related_execution,omitempty"`
+	MissingLinks     []string       `json:"missing_links,omitempty"`
+	Recommendation   string         `json:"recommendation,omitempty"`
+	Warnings         []string       `json:"warnings"`
+	BrokenRefs       []string       `json:"broken_refs"`
+}
+
+type EvidenceLink struct {
+	ID           string `json:"id"`
+	Kind         string `json:"kind"`
+	ArtifactPath string `json:"artifact_path"`
+	Title        string `json:"title,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Relation     string `json:"relation,omitempty"`
 }
 
 type jsonEvidenceFile struct {
@@ -149,16 +170,29 @@ func (g Graph) Trace(id string) (TraceResult, error) {
 	}
 
 	warnings, brokenRefs := g.traceMessages(id)
+	related := g.relatedEvidence(id)
+	missingLinks := g.missingLinks(id, related, warnings, brokenRefs)
 	return TraceResult{
-		SchemaVersion: SchemaVersion,
-		Environment:   g.Environment,
-		Query:         id,
-		Node:          node,
-		OutboundRefs:  sortedStrings(node.Refs),
-		InboundRefs:   g.inboundRefs(id),
-		Chains:        g.chains(id),
-		Warnings:      warnings,
-		BrokenRefs:    brokenRefs,
+		SchemaVersion:    SchemaVersion,
+		Environment:      g.Environment,
+		Query:            id,
+		ID:               id,
+		Kind:             node.Type,
+		Found:            true,
+		Node:             node,
+		OutboundRefs:     sortedStrings(node.Refs),
+		InboundRefs:      g.inboundRefs(id),
+		Chains:           g.chains(id),
+		RelatedIntent:    related[TypeIntent],
+		RelatedBehavior:  related[TypeBehavior],
+		RelatedDesign:    related[TypeDesign],
+		RelatedAssurance: related[TypeAssurance],
+		RelatedSecurity:  related[TypeSecurity],
+		RelatedExecution: related[TypeExecution],
+		MissingLinks:     missingLinks,
+		Recommendation:   recommendationForTrace(node, missingLinks),
+		Warnings:         warnings,
+		BrokenRefs:       brokenRefs,
 	}, nil
 }
 
@@ -166,23 +200,27 @@ func RenderText(result TraceResult) string {
 	var lines []string
 	lines = append(lines,
 		fmt.Sprintf("Trace: %s", result.Query),
-		fmt.Sprintf("Type: %s", result.Node.Type),
-		fmt.Sprintf("Artifact: %s", result.Node.ArtifactPath),
+		"",
+		result.Node.Type+":",
+		fmt.Sprintf("- Found in %s", result.Node.ArtifactPath),
 	)
 	if result.Node.Title != "" {
-		lines = append(lines, fmt.Sprintf("Title: %s", result.Node.Title))
+		lines = append(lines, "- "+result.Node.Title)
 	}
 	if result.Node.Status != "" {
-		lines = append(lines, fmt.Sprintf("Status: %s", result.Node.Status))
+		lines = append(lines, "- Status: "+result.Node.Status)
 	}
 	if result.Node.Critical {
-		lines = append(lines, "Critical: true")
+		lines = append(lines, "- Critical: true")
 	}
 
-	lines = append(lines, "", "Outbound References:")
-	lines = appendList(lines, result.OutboundRefs, "None.")
-	lines = append(lines, "", "Inbound References:")
-	lines = appendList(lines, result.InboundRefs, "None.")
+	lines = appendTraceSection(lines, "Related intent:", result.RelatedIntent, emptyRelatedText(result, TypeIntent))
+	lines = appendTraceSection(lines, "Related behavior:", result.RelatedBehavior, emptyRelatedText(result, TypeBehavior))
+	lines = appendTraceSection(lines, "Design evidence:", result.RelatedDesign, "No design evidence references "+result.Query+".")
+	lines = appendTraceSection(lines, "Assurance evidence:", result.RelatedAssurance, "No assurance result references "+result.Query+".")
+	lines = appendTraceSection(lines, "Security evidence:", result.RelatedSecurity, "No security evidence references "+result.Query+".")
+	lines = appendTraceSection(lines, "Execution evidence:", result.RelatedExecution, "No telemetry or execution signal references "+result.Query+".")
+
 	lines = append(lines, "", "Evidence Chain:")
 	if len(result.Chains) == 0 {
 		lines = append(lines, "- None.")
@@ -191,10 +229,13 @@ func RenderText(result TraceResult) string {
 			lines = append(lines, strings.Join(chain, " -> "))
 		}
 	}
-	lines = append(lines, "", "Warnings:")
-	lines = appendList(lines, result.Warnings, "None.")
-	lines = append(lines, "", "Broken References:")
-	lines = appendList(lines, result.BrokenRefs, "None.")
+	lines = append(lines, "", "Missing links:")
+	lines = appendList(lines, result.MissingLinks, "None.")
+	if len(result.BrokenRefs) > 0 {
+		lines = append(lines, "", "Broken references:")
+		lines = appendList(lines, result.BrokenRefs, "None.")
+	}
+	lines = append(lines, "", "Recommendation:", result.Recommendation)
 
 	return strings.Join(lines, "\n")
 }
@@ -205,6 +246,37 @@ func RenderJSON(result TraceResult) (string, error) {
 		return "", err
 	}
 	return string(content), nil
+}
+
+func appendTraceSection(lines []string, heading string, links []EvidenceLink, empty string) []string {
+	lines = append(lines, "", heading)
+	if len(links) == 0 {
+		if strings.HasPrefix(empty, "No ") {
+			return append(lines, "- Missing: "+empty)
+		}
+		return append(lines, "- "+empty)
+	}
+	for _, link := range links {
+		text := fmt.Sprintf("- %s found in %s", link.ID, link.ArtifactPath)
+		if link.Title != "" {
+			text += " (" + link.Title + ")"
+		}
+		if link.Status != "" {
+			text += " status=" + link.Status
+		}
+		if link.Relation != "" {
+			text += " [" + link.Relation + "]"
+		}
+		lines = append(lines, text)
+	}
+	return lines
+}
+
+func emptyRelatedText(result TraceResult, sectionType string) string {
+	if result.Node.Type == sectionType {
+		return "None."
+	}
+	return "No " + strings.ToLower(sectionType) + " evidence references " + result.Query + "."
 }
 
 func parseMarkdownArtifact(rootPath string, artifact artifact, graph *Graph) error {
@@ -356,8 +428,14 @@ func analyzeGraph(graph Graph, options Options) []Finding {
 			if !graph.behaviorLinkedToIntent(id) {
 				findings = append(findings, escalatedFinding(node, productionOrStrict, fmt.Sprintf("%s %s is not linked to intent evidence", node.ArtifactPath, id)))
 			}
-			if node.Critical && !graph.behaviorLinkedToAssurance(id) {
-				findings = append(findings, escalatedFinding(node, productionOrStrict, fmt.Sprintf("%s %s is critical but is not linked to assurance evidence", node.ArtifactPath, id)))
+			if !graph.behaviorLinkedToAssurance(id) {
+				if node.Critical {
+					findings = append(findings, escalatedFinding(node, productionOrStrict, fmt.Sprintf("%s %s is critical but is not linked to assurance evidence", node.ArtifactPath, id)))
+				} else {
+					findings = append(findings, warningFinding(node, fmt.Sprintf("Traceability Gap: %s exists, but no assurance result references it", id)))
+				}
+			} else if !graph.behaviorHasAssuranceEvidence(id) {
+				findings = append(findings, warningFinding(node, fmt.Sprintf("Traceability Gap: %s exists, but no assurance result references it", id)))
 			}
 		case TypeAssurance:
 			if !graph.assuranceLinkedToBehavior(id) {
@@ -365,11 +443,11 @@ func analyzeGraph(graph Graph, options Options) []Finding {
 			}
 		case TypeSecurity:
 			if !graph.securityLinkedToReleaseEvidence(id) {
-				findings = append(findings, warningFinding(node, fmt.Sprintf("%s %s is not linked to behavior or assurance evidence", node.ArtifactPath, id)))
+				findings = append(findings, warningFinding(node, fmt.Sprintf("%s %s is not mapped to behavior or intent evidence", node.ArtifactPath, id)))
 			}
 		case TypeExecution:
 			if !graph.executionLinkedToBehaviorOrAssurance(id) {
-				findings = append(findings, warningFinding(node, fmt.Sprintf("%s %s is not linked to behavior or assurance evidence", node.ArtifactPath, id)))
+				findings = append(findings, warningFinding(node, fmt.Sprintf("%s %s is not tied to behavior or assurance release readiness evidence", node.ArtifactPath, id)))
 			}
 		}
 	}
@@ -411,6 +489,10 @@ func (g Graph) inboundRefs(id string) []string {
 		}
 	}
 	return inbound
+}
+
+func (g Graph) InboundRefs(id string) []string {
+	return g.inboundRefs(id)
 }
 
 func (g Graph) chains(id string) [][]string {
@@ -478,6 +560,178 @@ func (g Graph) traceMessages(id string) ([]string, []string) {
 	return uniqueStrings(warnings), uniqueStrings(broken)
 }
 
+func (g Graph) relatedEvidence(id string) map[string][]EvidenceLink {
+	related := map[string][]EvidenceLink{
+		TypeIntent:    {},
+		TypeBehavior:  {},
+		TypeDesign:    {},
+		TypeAssurance: {},
+		TypeSecurity:  {},
+		TypeExecution: {},
+	}
+	query := g.Nodes[id]
+	anchors := map[string]struct{}{id: {}}
+	if query.Type == TypeIntent {
+		for _, behaviorID := range g.relatedBehaviorIDs(id) {
+			anchors[behaviorID] = struct{}{}
+		}
+	}
+	if query.Type != TypeBehavior {
+		for _, ref := range query.Refs {
+			if typeForID(ref) == TypeBehavior {
+				anchors[ref] = struct{}{}
+			}
+		}
+		for _, inbound := range g.inboundRefs(id) {
+			if typeForID(inbound) == TypeBehavior {
+				anchors[inbound] = struct{}{}
+			}
+		}
+	}
+
+	for _, candidateID := range g.OrderedIDs {
+		if candidateID == id {
+			continue
+		}
+		candidate := g.Nodes[candidateID]
+		relation := relationToAnchors(candidate, query, anchors)
+		if relation == "" {
+			continue
+		}
+		related[candidate.Type] = append(related[candidate.Type], evidenceLink(candidate, relation))
+	}
+
+	for key, links := range related {
+		related[key] = uniqueLinks(links)
+	}
+	return related
+}
+
+func (g Graph) relatedBehaviorIDs(id string) []string {
+	var ids []string
+	node := g.Nodes[id]
+	for _, ref := range node.Refs {
+		if typeForID(ref) == TypeBehavior {
+			ids = append(ids, ref)
+		}
+	}
+	for _, inbound := range g.inboundRefs(id) {
+		if typeForID(inbound) == TypeBehavior {
+			ids = append(ids, inbound)
+		}
+	}
+	return sortedStrings(ids)
+}
+
+func relationToAnchors(candidate Node, query Node, anchors map[string]struct{}) string {
+	if _, ok := anchors[candidate.ID]; ok {
+		return "related behavior"
+	}
+	for _, ref := range candidate.Refs {
+		if _, ok := anchors[ref]; ok {
+			return "references " + ref
+		}
+		if ref == query.ID {
+			return "references " + query.ID
+		}
+	}
+	for anchor := range anchors {
+		if containsString(query.Refs, candidate.ID) && anchor == query.ID {
+			return "referenced by " + query.ID
+		}
+	}
+	return ""
+}
+
+func evidenceLink(node Node, relation string) EvidenceLink {
+	return EvidenceLink{
+		ID:           node.ID,
+		Kind:         node.Type,
+		ArtifactPath: node.ArtifactPath,
+		Title:        node.Title,
+		Status:       node.Status,
+		Source:       node.Source,
+		Relation:     relation,
+	}
+}
+
+func uniqueLinks(links []EvidenceLink) []EvidenceLink {
+	seen := map[string]struct{}{}
+	unique := make([]EvidenceLink, 0, len(links))
+	for _, link := range links {
+		if _, ok := seen[link.ID]; ok {
+			continue
+		}
+		seen[link.ID] = struct{}{}
+		unique = append(unique, link)
+	}
+	sort.Slice(unique, func(i, j int) bool {
+		return nodeSortKey(unique[i].ID) < nodeSortKey(unique[j].ID)
+	})
+	return unique
+}
+
+func (g Graph) missingLinks(id string, related map[string][]EvidenceLink, warnings []string, broken []string) []string {
+	node := g.Nodes[id]
+	var missing []string
+	switch node.Type {
+	case TypeIntent:
+		if len(related[TypeBehavior]) == 0 {
+			missing = append(missing, id+" has no related behavior evidence")
+		}
+		for _, behavior := range related[TypeBehavior] {
+			if !g.behaviorHasDesignEvidence(behavior.ID) {
+				missing = append(missing, behavior.ID+" has no design reference")
+			}
+			if !g.behaviorHasAssuranceEvidence(behavior.ID) {
+				missing = append(missing, behavior.ID+" has no assurance result")
+			}
+		}
+		if len(related[TypeExecution]) == 0 {
+			missing = append(missing, "no execution signal references "+id)
+		}
+	case TypeBehavior:
+		if len(related[TypeIntent]) == 0 {
+			missing = append(missing, id+" has no related intent evidence")
+		}
+		if len(related[TypeDesign]) == 0 {
+			missing = append(missing, id+" has no design reference")
+		}
+		if len(related[TypeAssurance]) == 0 {
+			missing = append(missing, id+" has no assurance result")
+		}
+		if len(related[TypeSecurity]) == 0 {
+			missing = append(missing, id+" has no security evidence")
+		}
+		if len(related[TypeExecution]) == 0 {
+			missing = append(missing, id+" has no execution signal")
+		}
+	}
+	missing = append(missing, warnings...)
+	missing = append(missing, broken...)
+	return uniqueStrings(missing)
+}
+
+func recommendationForTrace(node Node, missing []string) string {
+	if len(missing) == 0 {
+		return "Keep related evidence current as this ID changes."
+	}
+	switch node.Type {
+	case TypeIntent:
+		return "Add or repair behavior and downstream evidence for " + node.ID + " so the intent can be audited end to end."
+	case TypeBehavior:
+		return "Add design, assurance, security, and execution evidence that references " + node.ID + "."
+	case TypeAssurance:
+		return "Add refs from " + node.ID + " to the behavior it validates."
+	case TypeSecurity:
+		return "Add refs from " + node.ID + " to the intent or behavior affected by the security evidence."
+	case TypeExecution:
+		return "Add refs from " + node.ID + " to the behavior or assurance evidence it measures."
+	default:
+		return "Repair missing links for " + node.ID + "."
+	}
+}
+
 func (g Graph) intentLinkedToBehavior(id string) bool {
 	node := g.Nodes[id]
 	for _, ref := range node.Refs {
@@ -523,6 +777,30 @@ func (g Graph) behaviorLinkedToAssurance(id string) bool {
 	return false
 }
 
+func (g Graph) behaviorHasAssuranceEvidence(id string) bool {
+	for _, inbound := range g.inboundRefs(id) {
+		if typeForID(inbound) == TypeAssurance {
+			return true
+		}
+	}
+	return false
+}
+
+func (g Graph) behaviorHasDesignEvidence(id string) bool {
+	for _, inbound := range g.inboundRefs(id) {
+		if typeForID(inbound) == TypeDesign {
+			return true
+		}
+	}
+	node := g.Nodes[id]
+	for _, ref := range node.Refs {
+		if typeForID(ref) == TypeDesign {
+			return true
+		}
+	}
+	return false
+}
+
 func (g Graph) behaviorLinkedToSecurity(id string) bool {
 	node := g.Nodes[id]
 	for _, ref := range node.Refs {
@@ -556,12 +834,12 @@ func (g Graph) assuranceLinkedToBehavior(id string) bool {
 func (g Graph) securityLinkedToReleaseEvidence(id string) bool {
 	node := g.Nodes[id]
 	for _, ref := range node.Refs {
-		if typeForID(ref) == TypeBehavior || typeForID(ref) == TypeAssurance {
+		if typeForID(ref) == TypeBehavior || typeForID(ref) == TypeIntent {
 			return true
 		}
 	}
 	for _, inbound := range g.inboundRefs(id) {
-		if typeForID(inbound) == TypeBehavior || typeForID(inbound) == TypeAssurance {
+		if typeForID(inbound) == TypeBehavior || typeForID(inbound) == TypeIntent {
 			return true
 		}
 	}

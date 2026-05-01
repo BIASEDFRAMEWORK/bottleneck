@@ -54,9 +54,9 @@ func NewEngine(basePath string, env string, optionFuncs ...EngineOption) *Engine
 			NewBehaviorValidator(bottleneckRoot, options.Strict),
 			NewIntentValidator(bottleneckRoot, options.Strict),
 			NewDesignValidator(bottleneckRoot, options.Strict),
-			NewAssuranceValidator(bottleneckRoot, envConfig.Assurance),
-			NewSecurityValidator(bottleneckRoot),
-			NewExecutionValidator(bottleneckRoot, envConfig.Execution),
+			NewAssuranceValidator(bottleneckRoot, envConfig.Assurance, options.Strict),
+			NewSecurityValidator(bottleneckRoot, envConfig.Security, options.Strict),
+			NewExecutionValidator(bottleneckRoot, envConfig.Execution, options.Strict),
 			NewTraceabilityValidator(bottleneckRoot, env, options.Strict),
 		},
 	}
@@ -116,6 +116,24 @@ func effectiveThresholdsFromConfig(envConfig config.EnvironmentConfig) models.Ef
 		Execution: models.ExecutionThresholds{
 			MaxErrorRate: envConfig.Execution.MaxErrorRate,
 			MinAdoption:  envConfig.Execution.MinAdoption,
+			Telemetry: models.TelemetryThresholds{
+				MaxAgeHours:           envConfig.Execution.Telemetry.MaxAgeHours,
+				MinDeploymentsPerWeek: envConfig.Execution.Telemetry.MinDeploymentsPerWeek,
+				MaxChangeFailureRate:  envConfig.Execution.Telemetry.MaxChangeFailureRate,
+				MaxErrorRate:          envConfig.Execution.Telemetry.MaxErrorRate,
+				MaxUserOverrideRate:   envConfig.Execution.Telemetry.MaxUserOverrideRate,
+				MinAdoptionRate:       envConfig.Execution.Telemetry.MinAdoptionRate,
+				MaxBudgetVariance:     envConfig.Execution.Telemetry.MaxBudgetVariance,
+			},
+		},
+		Security: models.SecurityThresholds{
+			SARIF: models.SARIFThresholds{
+				MaxCritical:           envConfig.Security.SARIF.MaxCritical,
+				MaxHigh:               envConfig.Security.SARIF.MaxHigh,
+				MaxMedium:             envConfig.Security.SARIF.MaxMedium,
+				MaxLow:                envConfig.Security.SARIF.MaxLow,
+				FailOnUnknownSeverity: envConfig.Security.SARIF.FailOnUnknownSeverity,
+			},
 		},
 	}
 }

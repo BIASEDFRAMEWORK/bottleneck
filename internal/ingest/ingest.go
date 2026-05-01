@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,7 @@ type EvidenceItem struct {
 	Refs       []string `json:"refs,omitempty"`
 	Severity   string   `json:"severity,omitempty"`
 	RuleID     string   `json:"rule_id,omitempty"`
+	RuleName   string   `json:"rule_name,omitempty"`
 	Path       string   `json:"path,omitempty"`
 	Line       *int     `json:"line,omitempty"`
 	Status     string   `json:"status"`
@@ -53,21 +55,41 @@ type SecurityArtifact struct {
 }
 
 type ExecutionArtifact struct {
-	SourceEnvironment string         `json:"source_environment,omitempty"`
-	WindowStart       string         `json:"window_start,omitempty"`
-	WindowEnd         string         `json:"window_end,omitempty"`
-	AdoptionRate      float64        `json:"adoption_rate"`
-	ErrorRate         float64        `json:"error_rate"`
-	LatencyP95Ms      *float64       `json:"latency_p95_ms,omitempty"`
-	RollbackRate      *float64       `json:"rollback_rate,omitempty"`
-	UserOverrideRate  *float64       `json:"user_override_rate,omitempty"`
-	Cost              *ExecutionCost `json:"cost,omitempty"`
-	Evidence          []EvidenceItem `json:"evidence,omitempty"`
+	GeneratedAt         string               `json:"generated_at,omitempty"`
+	SourceEnvironment   string               `json:"source_environment,omitempty"`
+	Window              *TelemetryWindow     `json:"window,omitempty"`
+	WindowStart         string               `json:"window_start,omitempty"`
+	WindowEnd           string               `json:"window_end,omitempty"`
+	DeploymentFrequency *DeploymentFrequency `json:"deployment_frequency,omitempty"`
+	ChangeFailureRate   float64              `json:"change_failure_rate,omitempty"`
+	AdoptionRate        float64              `json:"adoption_rate"`
+	ErrorRate           float64              `json:"error_rate"`
+	LatencyP95Ms        *float64             `json:"latency_p95_ms,omitempty"`
+	RollbackRate        *float64             `json:"rollback_rate,omitempty"`
+	UserOverrideRate    *float64             `json:"user_override_rate,omitempty"`
+	Cost                *ExecutionCost       `json:"cost,omitempty"`
+	Evidence            []EvidenceItem       `json:"evidence,omitempty"`
+}
+
+type TelemetryWindow struct {
+	Start string `json:"start,omitempty"`
+	End   string `json:"end,omitempty"`
+}
+
+type DeploymentFrequency struct {
+	Deployments int     `json:"deployments"`
+	PeriodDays  float64 `json:"period_days"`
 }
 
 type ExecutionCost struct {
-	TotalUSD    float64 `json:"total_usd,omitempty"`
-	UnitCostUSD float64 `json:"unit_cost_usd,omitempty"`
+	Total          float64 `json:"total,omitempty"`
+	TotalUSD       float64 `json:"total_usd,omitempty"`
+	Currency       string  `json:"currency,omitempty"`
+	Budget         float64 `json:"budget,omitempty"`
+	BudgetVariance float64 `json:"budget_variance,omitempty"`
+	CostPerRequest float64 `json:"cost_per_request,omitempty"`
+	UnitCostUSD    float64 `json:"unit_cost_usd,omitempty"`
+	Trend          string  `json:"trend,omitempty"`
 }
 
 type TestSummaryInput struct {
@@ -135,6 +157,7 @@ func IngestCucumber(rootPath, filePath, outPath string, merge, dryRun bool) (Ing
 	}
 
 	artifact, warnings := normalizeCucumber(report, filePath)
+	warnings = append(warnings, unmatchedBehaviorWarnings(rootPath, artifact)...)
 	if outPath == "" {
 		outPath = DefaultAssuranceOutput
 	}
@@ -156,9 +179,13 @@ func IngestCucumber(rootPath, filePath, outPath string, merge, dryRun bool) (Ing
 }
 
 func IngestCodeQL(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
+	return IngestSARIF(rootPath, filePath, outPath, merge, dryRun)
+}
+
+func IngestSARIF(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return IngestSummary{}, fmt.Errorf("read codeql file: %w", err)
+		return IngestSummary{}, fmt.Errorf("read sarif file: %w", err)
 	}
 
 	var sarif sarifReport
@@ -166,7 +193,7 @@ func IngestCodeQL(rootPath, filePath, outPath string, merge, dryRun bool) (Inges
 		return IngestSummary{}, fmt.Errorf("parse sarif json: %w", err)
 	}
 
-	artifact := normalizeCodeQL(sarif, filePath)
+	artifact := normalizeSARIF(sarif, filePath)
 	if outPath == "" {
 		outPath = DefaultSecurityOutput
 	}
@@ -233,6 +260,7 @@ func IngestTelemetry(rootPath, filePath, outPath string, merge, dryRun bool) (In
 		return IngestSummary{}, fmt.Errorf("parse telemetry json: %w", err)
 	}
 
+	normalizeTelemetryRates(&input)
 	for i := range input.Evidence {
 		if input.Evidence[i].Type == "" {
 			input.Evidence[i].Type = "telemetry"
@@ -241,6 +269,16 @@ func IngestTelemetry(rootPath, filePath, outPath string, merge, dryRun bool) (In
 			input.Evidence[i].Source = filePath
 		}
 		input.Evidence[i].IngestedAt = currentTime().Format(time.RFC3339)
+	}
+	if len(input.Evidence) == 0 {
+		input.Evidence = []EvidenceItem{{
+			ID:         "EXECUTION-001",
+			Type:       "telemetry",
+			Source:     filePath,
+			Status:     "pass",
+			Summary:    "Telemetry snapshot ingested.",
+			IngestedAt: currentTime().Format(time.RFC3339),
+		}}
 	}
 
 	if outPath == "" {
@@ -386,18 +424,12 @@ func normalizeCucumber(report cucumberReport, source string) (AssuranceArtifact,
 	warnings := []string{}
 
 	for _, feature := range report {
-		for _, element := range feature.Elements {
-			if element.Type != "scenario" && element.Type != "scenario_outline" && element.Type != "background" {
+		for _, element := range feature.scenarios() {
+			if !element.isScenario() {
 				continue
 			}
 			total++
-			status := "pass"
-			for _, step := range element.Steps {
-				if strings.ToLower(step.Result.Status) != "passed" {
-					status = "fail"
-					break
-				}
-			}
+			status := cucumberScenarioStatus(element)
 
 			refs := extractBehaviorRefs(element.Tags)
 			refs = append(refs, extractBehaviorRefs(feature.Tags)...)
@@ -440,20 +472,64 @@ func normalizeCucumber(report cucumberReport, source string) (AssuranceArtifact,
 	}, warnings
 }
 
-func normalizeCodeQL(report sarifReport, source string) SecurityArtifact {
+func cucumberScenarioStatus(element cucumberElement) string {
+	if len(element.Steps) == 0 {
+		return "fail"
+	}
+	for _, step := range element.Steps {
+		if strings.ToLower(strings.TrimSpace(step.Result.Status)) != "passed" {
+			return "fail"
+		}
+	}
+	return "pass"
+}
+
+func unmatchedBehaviorWarnings(rootPath string, artifact AssuranceArtifact) []string {
+	behaviorIDs := behaviorIDsFromSpec(rootPath)
+	if len(behaviorIDs) == 0 {
+		return nil
+	}
+	covered := map[string]bool{}
+	for _, evidence := range artifact.Evidence {
+		for _, ref := range evidence.Refs {
+			covered[ref] = true
+		}
+	}
+	var warnings []string
+	for _, id := range behaviorIDs {
+		if !covered[id] {
+			warnings = append(warnings, fmt.Sprintf("behavior %s has no matching Cucumber scenario evidence", id))
+		}
+	}
+	return warnings
+}
+
+func behaviorIDsFromSpec(rootPath string) []string {
+	content, err := os.ReadFile(filepath.Join(rootPath, "bottleneck", "behavior", "behavior-spec.md"))
+	if err != nil {
+		return nil
+	}
+	matches := regexp.MustCompile(`\bBEHAVIOR-[0-9]{3,}\b`).FindAllString(string(content), -1)
+	return uniqueStrings(matches)
+}
+
+func normalizeSARIF(report sarifReport, source string) SecurityArtifact {
 	findings := map[string]int{
 		"critical": 0,
 		"high":     0,
 		"medium":   0,
 		"low":      0,
 		"note":     0,
+		"unknown":  0,
 	}
 	violations := 0
 	evidence := []EvidenceItem{}
 
 	for _, run := range report.Runs {
+		rules := sarifRulesByID(run)
 		for _, result := range run.Results {
-			severity := determineSeverity(result)
+			rule := rules[result.RuleID]
+			severity := determineSeverity(result, rule)
 			findings[severity]++
 			violations++
 			path, line := extractSarifLocation(result)
@@ -464,10 +540,11 @@ func normalizeCodeQL(report sarifReport, source string) SecurityArtifact {
 
 			evidence = append(evidence, EvidenceItem{
 				ID:         fmt.Sprintf("SECURITY-%03d", len(evidence)+1),
-				Type:       "codeql",
+				Type:       "sarif",
 				Source:     source,
 				Severity:   severity,
 				RuleID:     result.RuleID,
+				RuleName:   rule.Name,
 				Path:       path,
 				Line:       line,
 				Status:     "fail",
@@ -475,6 +552,16 @@ func normalizeCodeQL(report sarifReport, source string) SecurityArtifact {
 				IngestedAt: currentTime().Format(time.RFC3339),
 			})
 		}
+	}
+	if violations == 0 {
+		evidence = append(evidence, EvidenceItem{
+			ID:         "SECURITY-001",
+			Type:       "sarif",
+			Source:     source,
+			Status:     "pass",
+			Summary:    "SARIF scan completed with no findings.",
+			IngestedAt: currentTime().Format(time.RFC3339),
+		})
 	}
 
 	return SecurityArtifact{
@@ -516,8 +603,21 @@ func normalizeTestSummary(input TestSummaryInput, source string) (AssuranceArtif
 	return artifact, nil
 }
 
-func determineSeverity(result sarifResult) string {
+func sarifRulesByID(run sarifRun) map[string]sarifRule {
+	rules := map[string]sarifRule{}
+	for _, rule := range run.Tool.Driver.Rules {
+		if rule.ID != "" {
+			rules[rule.ID] = rule
+		}
+	}
+	return rules
+}
+
+func determineSeverity(result sarifResult, rule sarifRule) string {
 	if sev := extractStringProperty(result.Properties, "security-severity"); sev != "" {
+		return normalizeSeverity(sev)
+	}
+	if sev := extractStringProperty(result.Properties, "problem.severity"); sev != "" {
 		return normalizeSeverity(sev)
 	}
 	if sev := extractStringProperty(result.Properties, "severity"); sev != "" {
@@ -526,10 +626,46 @@ func determineSeverity(result sarifResult) string {
 	if sev := extractStringProperty(result.Properties, "level"); sev != "" {
 		return normalizeSeverity(sev)
 	}
+	if sev := extractStringProperty(rule.Properties, "security-severity"); sev != "" {
+		return normalizeSeverity(sev)
+	}
+	if sev := extractStringProperty(rule.Properties, "problem.severity"); sev != "" {
+		return normalizeSeverity(sev)
+	}
+	if sev := extractStringProperty(rule.Properties, "severity"); sev != "" {
+		return normalizeSeverity(sev)
+	}
 	if result.Level != "" {
 		return normalizeSeverity(result.Level)
 	}
-	return "note"
+	if rule.DefaultConfiguration.Level != "" {
+		return normalizeSeverity(rule.DefaultConfiguration.Level)
+	}
+	return "unknown"
+}
+
+func normalizeTelemetryRates(input *ExecutionArtifact) {
+	input.ChangeFailureRate = normalizeRatio(input.ChangeFailureRate)
+	input.AdoptionRate = normalizeRatio(input.AdoptionRate)
+	input.ErrorRate = normalizeRatio(input.ErrorRate)
+	if input.UserOverrideRate != nil {
+		normalized := normalizeRatio(*input.UserOverrideRate)
+		input.UserOverrideRate = &normalized
+	}
+	if input.Cost != nil {
+		input.Cost.BudgetVariance = normalizeRatio(input.Cost.BudgetVariance)
+	}
+}
+
+func normalizeRatio(value float64) float64 {
+	absolute := value
+	if absolute < 0 {
+		absolute = -absolute
+	}
+	if absolute > 1 && absolute <= 100 {
+		return value / 100
+	}
+	return value
 }
 
 func extractStringProperty(properties map[string]interface{}, key string) string {
@@ -543,11 +679,28 @@ func extractStringProperty(properties map[string]interface{}, key string) string
 	if s, ok := value.(string); ok {
 		return s
 	}
+	if f, ok := value.(float64); ok {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
 	return ""
 }
 
 func normalizeSeverity(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
+	if numeric, err := strconv.ParseFloat(value, 64); err == nil {
+		switch {
+		case numeric >= 9.0:
+			return "critical"
+		case numeric >= 7.0:
+			return "high"
+		case numeric >= 4.0:
+			return "medium"
+		case numeric > 0:
+			return "low"
+		default:
+			return "note"
+		}
+	}
 	switch value {
 	case "critical", "high", "medium", "low", "note":
 		return value
@@ -558,7 +711,7 @@ func normalizeSeverity(value string) string {
 	case "none":
 		return "note"
 	}
-	return "note"
+	return "unknown"
 }
 
 func extractSarifLocation(result sarifResult) (string, *int) {
@@ -610,9 +763,10 @@ func uniqueStrings(items []string) []string {
 type cucumberReport []cucumberFeature
 
 type cucumberFeature struct {
-	Name     string            `json:"name"`
-	Elements []cucumberElement `json:"elements"`
-	Tags     []tag             `json:"tags"`
+	Name      string            `json:"name"`
+	Elements  []cucumberElement `json:"elements"`
+	Scenarios []cucumberElement `json:"scenarios"`
+	Tags      []tag             `json:"tags"`
 }
 
 type cucumberElement struct {
@@ -620,6 +774,22 @@ type cucumberElement struct {
 	Type  string         `json:"type"`
 	Steps []cucumberStep `json:"steps"`
 	Tags  []tag          `json:"tags"`
+}
+
+func (f cucumberFeature) scenarios() []cucumberElement {
+	if len(f.Elements) == 0 {
+		return f.Scenarios
+	}
+	return append(append([]cucumberElement{}, f.Elements...), f.Scenarios...)
+}
+
+func (e cucumberElement) isScenario() bool {
+	switch strings.ToLower(strings.TrimSpace(e.Type)) {
+	case "", "scenario", "scenario_outline":
+		return true
+	default:
+		return false
+	}
 }
 
 type cucumberStep struct {
@@ -641,6 +811,26 @@ type sarifReport struct {
 
 type sarifRun struct {
 	Results []sarifResult `json:"results"`
+	Tool    sarifTool     `json:"tool"`
+}
+
+type sarifTool struct {
+	Driver sarifDriver `json:"driver"`
+}
+
+type sarifDriver struct {
+	Rules []sarifRule `json:"rules"`
+}
+
+type sarifRule struct {
+	ID                   string                 `json:"id"`
+	Name                 string                 `json:"name"`
+	Properties           map[string]interface{} `json:"properties"`
+	DefaultConfiguration sarifDefaultConfig     `json:"defaultConfiguration"`
+}
+
+type sarifDefaultConfig struct {
+	Level string `json:"level"`
 }
 
 type sarifResult struct {

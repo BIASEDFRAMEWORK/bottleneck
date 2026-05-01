@@ -1,4 +1,31 @@
 {
-  "adoption_rate": 0.9,
-  "error_rate": 0.01
+  "generated_at": "2026-04-30T12:00:00Z",
+  "window": {
+    "start": "2026-04-23T00:00:00Z",
+    "end": "2026-04-30T00:00:00Z"
+  },
+  "deployment_frequency": {
+    "deployments": 7,
+    "period_days": 7
+  },
+  "change_failure_rate": 0.05,
+  "adoption_rate": 0.72,
+  "error_rate": 0.02,
+  "user_override_rate": 0.03,
+  "source_environment": "sample",
+  "cost": {
+    "total": 120.5,
+    "currency": "USD",
+    "budget": 150,
+    "trend": "stable"
+  },
+  "evidence": [
+    {
+      "id": "EXECUTION-001",
+      "refs": ["BEHAVIOR-001", "ASSURANCE-001"],
+      "source": "sample telemetry",
+      "status": "pass",
+      "summary": "Sample pilot telemetry shows reviewers used the summary flow with low processing errors."
+    }
+  ]
 }

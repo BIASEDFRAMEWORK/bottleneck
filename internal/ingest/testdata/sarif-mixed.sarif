@@ -1,0 +1,68 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "rules": [
+            {
+              "id": "go/sql-injection",
+              "name": "SQL injection",
+              "properties": {"security-severity": "8.8"}
+            },
+            {
+              "id": "go/log-injection",
+              "name": "Log injection",
+              "defaultConfiguration": {"level": "warning"}
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "go/sql-injection",
+          "message": {"text": "Database query built from user-controlled input"},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "internal/db/query.go"}, "region": {"startLine": 42}}}
+          ]
+        },
+        {
+          "ruleId": "go/log-injection",
+          "level": "warning",
+          "message": {"text": "Log message includes untrusted input"},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "internal/log/log.go"}, "region": {"startLine": 12}}}
+          ]
+        }
+      ]
+    },
+    {
+      "tool": {
+        "driver": {
+          "name": "Other Scanner",
+          "rules": []
+        }
+      },
+      "results": [
+        {
+          "ruleId": "generic/critical",
+          "properties": {"security-severity": "9.1"},
+          "message": {"text": "Critical issue"},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "internal/auth/auth.go"}, "region": {"startLine": 7}}}
+          ]
+        },
+        {
+          "ruleId": "generic/low",
+          "properties": {"security-severity": "2.0"},
+          "message": {"text": "Low issue"}
+        },
+        {
+          "ruleId": "generic/unknown",
+          "message": {"text": "Unknown severity issue"}
+        }
+      ]
+    }
+  ]
+}

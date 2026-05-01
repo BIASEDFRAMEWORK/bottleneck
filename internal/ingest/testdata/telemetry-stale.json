@@ -1,0 +1,19 @@
+{
+  "generated_at": "2000-01-01T00:00:00Z",
+  "window": {
+    "start": "1999-12-25T00:00:00Z",
+    "end": "2000-01-01T00:00:00Z"
+  },
+  "deployment_frequency": {
+    "deployments": 7,
+    "period_days": 7
+  },
+  "change_failure_rate": 0.05,
+  "error_rate": 0.01,
+  "user_override_rate": 0.03,
+  "adoption_rate": 0.72,
+  "cost": {
+    "total": 120.5,
+    "budget": 150
+  }
+}

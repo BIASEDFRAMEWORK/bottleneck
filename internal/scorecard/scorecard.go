@@ -48,16 +48,17 @@ type Scorecard struct {
 }
 
 type CapabilityScorecard struct {
-	Capability        string   `json:"capability"`
-	Status            string   `json:"status"`
-	Score             int      `json:"score"`
-	Owner             string   `json:"owner"`
-	Bottleneck        string   `json:"bottleneck"`
-	EvidenceCount     int      `json:"evidence_count"`
-	MissingEvidence   []string `json:"missing_evidence"`
-	Reason            string   `json:"reason"`
-	RecommendedAction string   `json:"recommended_action"`
-	Evidence          []string `json:"evidence"`
+	Capability        string               `json:"capability"`
+	Status            string               `json:"status"`
+	Score             int                  `json:"score"`
+	Owner             string               `json:"owner"`
+	Bottleneck        string               `json:"bottleneck"`
+	EvidenceCount     int                  `json:"evidence_count"`
+	MissingEvidence   []string             `json:"missing_evidence"`
+	ScoreImpacts      []models.ScoreImpact `json:"score_impacts,omitempty"`
+	Reason            string               `json:"reason"`
+	RecommendedAction string               `json:"recommended_action"`
+	Evidence          []string             `json:"evidence"`
 }
 
 type capabilityMetadata struct {
@@ -128,7 +129,7 @@ var metadataByCapability = map[string]capabilityMetadata{
 		bottleneck:        "Traceability gaps",
 		passingArtifact:   "bottleneck/*",
 		missingEvidence:   "Add evidence IDs and Refs links across intent, behavior, assurance, security, and execution artifacts.",
-		recommendedAction: "Run bottleneck trace for the affected ID and repair missing, duplicate, or orphaned evidence links.",
+		recommendedAction: "Run bottleneck trace --id <ID> for the affected ID and repair missing, duplicate, or orphaned evidence links.",
 		passAction:        "Keep evidence IDs and Refs links current as release evidence changes.",
 	},
 	"Config": {
@@ -218,6 +219,7 @@ func buildCapability(validation models.ValidationResult, score int) CapabilitySc
 		Bottleneck:        meta.bottleneck,
 		EvidenceCount:     len(evidence),
 		MissingEvidence:   missingEvidence,
+		ScoreImpacts:      validation.EvidenceQuality.ScoreImpacts,
 		Reason:            reasonFor(validation),
 		RecommendedAction: recommendedActionFor(validation, meta),
 		Evidence:          evidence,
@@ -237,26 +239,12 @@ func renderText(card Scorecard, view string) string {
 
 func renderEngineeringText(card Scorecard) string {
 	var lines []string
-	lines = append(lines, scorecardHeader(card)...)
-	lines = appendDiagnosisText(lines, card)
+	lines = append(lines, gaugeScorecardHeader(card)...)
 	lines = appendGitHubText(lines, card)
+	lines = append(lines, "", "Category Gauges:")
+	lines = appendGaugeLines(lines, card)
 	lines = append(lines, "", "Effective Thresholds:")
 	lines = append(lines, thresholdLines(card.EffectiveThresholds, "  ")...)
-	lines = append(lines, "", "Capabilities:")
-	lines = append(lines, fmt.Sprintf("%-12s %-8s %-6s %-8s %-24s %s", "Capability", "Status", "Score", "Evidence", "Owner", "Reason"))
-	lines = append(lines, fmt.Sprintf("%-12s %-8s %-6s %-8s %-24s %s", "----------", "------", "-----", "--------", "-----", "------"))
-
-	for _, capability := range card.Capabilities {
-		lines = append(lines, fmt.Sprintf(
-			"%-12s %-8s %-6d %-8d %-24s %s",
-			capability.Capability,
-			capability.Status,
-			capability.Score,
-			capability.EvidenceCount,
-			capability.Owner,
-			capability.Reason,
-		))
-	}
 
 	lines = append(lines, "", "Capability Details:")
 	for _, capability := range card.Capabilities {
@@ -274,10 +262,39 @@ func renderEngineeringText(card Scorecard) string {
 		lines = appendBulletLines(lines, capability.Evidence, "    ", "None reported.")
 		lines = append(lines, "  Missing Evidence:")
 		lines = appendBulletLines(lines, capability.MissingEvidence, "    ", "None.")
+		lines = append(lines, "  Score Impacts:")
+		lines = appendScoreImpactLines(lines, capability.ScoreImpacts, "    ")
 	}
 
 	lines = append(lines, "", "Bottom line:", card.BottomLine)
 	return strings.Join(lines, "\n")
+}
+
+func gaugeScorecardHeader(card Scorecard) []string {
+	lines := []string{
+		"Bottleneck Scorecard",
+		"",
+		fmt.Sprintf("Environment: %s", card.Environment),
+		fmt.Sprintf("System Status: %s", card.SystemStatus),
+		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
+		"",
+		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
+	}
+	if len(card.Diagnosis.TiedBottlenecks) > 0 {
+		lines = append(lines, fmt.Sprintf("Tied Bottlenecks: %s", strings.Join(card.Diagnosis.TiedBottlenecks, ", ")))
+	}
+	if card.Diagnosis.Confidence != "" {
+		lines = append(lines, fmt.Sprintf("Diagnosis Confidence: %s", card.Diagnosis.Confidence))
+	}
+	lines = append(lines,
+		"",
+		"Overall Diagnosis:",
+		fmt.Sprintf("Why: %s", card.Diagnosis.WhyItMatters),
+		"",
+		"Next action:",
+		card.Diagnosis.RecommendedAction,
+	)
+	return lines
 }
 
 func renderExecutiveText(card Scorecard) string {
@@ -388,6 +405,8 @@ func renderEngineeringMarkdown(card Scorecard) string {
 		lines = appendMarkdownBullets(lines, capability.Evidence, "  ", "None reported.")
 		lines = append(lines, "- Missing Evidence:")
 		lines = appendMarkdownBullets(lines, capability.MissingEvidence, "  ", "None.")
+		lines = append(lines, "- Score Impacts:")
+		lines = appendMarkdownScoreImpacts(lines, capability.ScoreImpacts, "  ")
 	}
 	lines = append(lines, "", "## Bottom Line", "", card.BottomLine)
 	return strings.Join(lines, "\n")
@@ -622,7 +641,77 @@ func thresholdRows(thresholds models.EffectiveThresholds) []thresholdRow {
 		{name: "assurance.max_failures", value: fmt.Sprintf("%d", thresholds.Assurance.MaxFailures)},
 		{name: "execution.max_error_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.MaxErrorRate)},
 		{name: "execution.min_adoption", value: fmt.Sprintf("%.2f", thresholds.Execution.MinAdoption)},
+		{name: "execution.telemetry.max_age_hours", value: fmt.Sprintf("%d", thresholds.Execution.Telemetry.MaxAgeHours)},
+		{name: "execution.telemetry.min_deployments_per_week", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MinDeploymentsPerWeek)},
+		{name: "execution.telemetry.max_change_failure_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MaxChangeFailureRate)},
+		{name: "execution.telemetry.max_error_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MaxErrorRate)},
+		{name: "execution.telemetry.max_user_override_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MaxUserOverrideRate)},
+		{name: "execution.telemetry.min_adoption_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MinAdoptionRate)},
+		{name: "execution.telemetry.max_budget_variance", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MaxBudgetVariance)},
+		{name: "security.sarif.max_critical", value: fmt.Sprintf("%d", thresholds.Security.SARIF.MaxCritical)},
+		{name: "security.sarif.max_high", value: fmt.Sprintf("%d", thresholds.Security.SARIF.MaxHigh)},
+		{name: "security.sarif.max_medium", value: fmt.Sprintf("%d", thresholds.Security.SARIF.MaxMedium)},
+		{name: "security.sarif.max_low", value: fmt.Sprintf("%d", thresholds.Security.SARIF.MaxLow)},
+		{name: "security.sarif.fail_on_unknown_severity", value: fmt.Sprintf("%t", thresholds.Security.SARIF.FailOnUnknownSeverity)},
 	}
+}
+
+func appendGaugeLines(lines []string, card Scorecard) []string {
+	scores := map[string]int{}
+	for _, score := range card.Diagnosis.CategoryScores {
+		scores[score.Category] = score.Score
+	}
+
+	for _, category := range []string{"Behavior", "Intent", "Design", "Assurance", "Security", "Execution"} {
+		score, ok := scores[category]
+		if !ok {
+			lines = append(lines, fmt.Sprintf("%-10s [??????????] unknown%s", category, bottleneckMarker(card, category)))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%-10s %s %3d%s", category, gauge(score, 10), clampGaugeScore(score), bottleneckMarker(card, category)))
+	}
+
+	return lines
+}
+
+func gauge(score int, width int) string {
+	if width <= 0 {
+		return "[]"
+	}
+	score = clampGaugeScore(score)
+	filled := score * width / 100
+	if filled > width {
+		filled = width
+	}
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", width-filled) + "]"
+}
+
+func clampGaugeScore(score int) int {
+	if score < 0 {
+		return 0
+	}
+	if score > 100 {
+		return 100
+	}
+	return score
+}
+
+func bottleneckMarker(card Scorecard, category string) string {
+	if card.PrimaryBottleneck == "None" {
+		return ""
+	}
+	if len(card.Diagnosis.TiedBottlenecks) > 0 {
+		for _, tied := range card.Diagnosis.TiedBottlenecks {
+			if tied == category {
+				return "  <-- tied bottleneck"
+			}
+		}
+		return ""
+	}
+	if card.PrimaryBottleneck == category {
+		return "  <-- primary bottleneck"
+	}
+	return ""
 }
 
 func evidenceItems(validation models.ValidationResult) []string {
@@ -637,6 +726,8 @@ func missingEvidenceFor(validation models.ValidationResult, evidence []string, m
 	var missing []string
 	status := displayStatus(validation.Status)
 	message := strings.ToLower(validation.Message)
+
+	missing = append(missing, validation.EvidenceQuality.Missing...)
 
 	for _, detail := range validation.Details {
 		if missingDetail := missingEvidenceFromDetail(detail); missingDetail != "" {
@@ -895,6 +986,16 @@ func appendBulletLines(lines []string, items []string, prefix string, emptyText 
 	return lines
 }
 
+func appendScoreImpactLines(lines []string, impacts []models.ScoreImpact, prefix string) []string {
+	if len(impacts) == 0 {
+		return append(lines, prefix+"- None.")
+	}
+	for _, impact := range impacts {
+		lines = append(lines, fmt.Sprintf("%s- %s (%+d)", prefix, impact.Reason, impact.Delta))
+	}
+	return lines
+}
+
 func appendMarkdownBullets(lines []string, items []string, prefix string, emptyText string) []string {
 	if len(items) == 0 {
 		return append(lines, prefix+"- "+markdownText(emptyText))
@@ -902,6 +1003,16 @@ func appendMarkdownBullets(lines []string, items []string, prefix string, emptyT
 
 	for _, item := range items {
 		lines = append(lines, prefix+"- "+markdownText(item))
+	}
+	return lines
+}
+
+func appendMarkdownScoreImpacts(lines []string, impacts []models.ScoreImpact, prefix string) []string {
+	if len(impacts) == 0 {
+		return append(lines, prefix+"- None.")
+	}
+	for _, impact := range impacts {
+		lines = append(lines, fmt.Sprintf("%s- %s (%+d)", prefix, markdownText(impact.Reason), impact.Delta))
 	}
 	return lines
 }

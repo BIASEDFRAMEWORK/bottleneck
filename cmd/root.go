@@ -9,8 +9,8 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:           "bottleneck",
-	Short:         "bottleneck SDLC scorecard",
-	Long:          "bottleneck is an SDLC scorecard application that examines framework evidence artifacts.",
+	Short:         "Diagnose delivery risk with the BIASED evidence model",
+	Long:          "Bottleneck is a CLI that diagnoses delivery risk using the BIASED evidence model. It validates local evidence artifacts, renders scorecards, checks release readiness, and explains the primary bottleneck diagnosis.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

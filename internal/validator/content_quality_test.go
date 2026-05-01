@@ -14,18 +14,18 @@ const (
 	templateIntent   = "# Intent\n\n## Outcomes\n\nDescribe required outcomes.\n\n## Constraints\n\nDescribe system constraints.\n\n## Success Criteria\n\nDescribe measurable success criteria.\n"
 	templateDesign   = "# Architecture\n\nDescribe system architecture.\n"
 
-	validBehavior = "# Behavior Specification\n\n## Expected Behavior\n\nThe service returns a deterministic answer for every accepted workflow request.\n\n## Unacceptable Behavior\n\n- Reject unsigned release requests before any deployment step starts.\n"
-	validIntent   = "# Intent\n\n## Outcomes\n\nThe platform reduces release review time by surfacing every failing capability.\n\n## Constraints\n\n- All validation rules remain deterministic and runnable without network access.\n\n## Success Criteria\n\nOperators can identify the primary bottleneck from a single CLI run.\n"
-	validDesign   = "# Architecture\n\nThe CLI reads local evidence artifacts, applies deterministic validators, and renders the same result through validate, explain, and scorecard commands.\n"
+	validBehavior = "# Behavior Specification\n\n## Expected Behavior\n\n### BEHAVIOR-001: Block unsafe release\nRefs:\n- INTENT-001\n- ASSURANCE-001\n\nThe service returns a deterministic answer for every accepted workflow request and blocks release when assurance fails.\n\n## Unacceptable Behavior\n\n- Reject unsigned release requests before any deployment step starts.\n"
+	validIntent   = "# Intent\n\n## Outcomes\n\n### INTENT-001: Reduce review time\nRefs:\n- BEHAVIOR-001\n\nThe platform reduces release review time by surfacing every failing capability.\n\n## Constraints\n\n- All validation rules remain deterministic and runnable without network access.\n\n## Success Criteria\n\n- At least 95% of release checks identify the primary bottleneck within 1 CLI run.\n"
+	validDesign   = "# Architecture\n\n### DESIGN-001: Local deterministic validation\nRefs:\n- INTENT-001\n- BEHAVIOR-001\n\nThe CLI reads local evidence artifacts, applies deterministic validators, and renders the same result through validate, explain, and scorecard commands.\n"
 )
 
 func TestFreshTemplateArtifactsProduceWarningsByDefault(t *testing.T) {
 	basePath := t.TempDir()
-	writeValidationProject(t, basePath, map[string]string{
+	writeValidationProject(t, basePath, withoutTraceEvidence(map[string]string{
 		"bottleneck/behavior/behavior-spec.md": templateBehavior,
 		"bottleneck/intent/intent.md":          templateIntent,
 		"bottleneck/design/architecture.md":    templateDesign,
-	})
+	}))
 
 	result := NewEngine(basePath, "default").Validate()
 
@@ -46,11 +46,11 @@ func TestFreshTemplateArtifactsProduceWarningsByDefault(t *testing.T) {
 
 func TestFreshTemplateArtifactsProduceFailuresInStrictMode(t *testing.T) {
 	basePath := t.TempDir()
-	writeValidationProject(t, basePath, map[string]string{
+	writeValidationProject(t, basePath, withoutTraceEvidence(map[string]string{
 		"bottleneck/behavior/behavior-spec.md": templateBehavior,
 		"bottleneck/intent/intent.md":          templateIntent,
 		"bottleneck/design/architecture.md":    templateDesign,
-	})
+	}))
 
 	result := NewEngine(basePath, "default", WithStrictMode(true)).Validate()
 
@@ -74,11 +74,11 @@ func TestFreshTemplateArtifactsProduceFailuresInStrictMode(t *testing.T) {
 
 func TestPlaceholderWarningsIdentifyExactFileAndSection(t *testing.T) {
 	basePath := t.TempDir()
-	writeValidationProject(t, basePath, map[string]string{
+	writeValidationProject(t, basePath, withoutTraceEvidence(map[string]string{
 		"bottleneck/behavior/behavior-spec.md": templateBehavior,
 		"bottleneck/intent/intent.md":          templateIntent,
 		"bottleneck/design/architecture.md":    templateDesign,
-	})
+	}))
 
 	result := NewEngine(basePath, "default").Validate()
 
@@ -101,8 +101,8 @@ func TestPlaceholderWarningsIdentifyExactFileAndSection(t *testing.T) {
 func TestPartiallyCompletedArtifactsWarnOnlyForUnchangedOrInsufficientSections(t *testing.T) {
 	basePath := t.TempDir()
 	writeValidationProject(t, basePath, map[string]string{
-		"bottleneck/behavior/behavior-spec.md": "# Behavior Specification\n\n## Expected Behavior\n\nThe system stores validated deployment evidence before rendering summaries.\n\n## Unacceptable Behavior\n\nDescribe behavior the system must prevent.\n",
-		"bottleneck/intent/intent.md":          "# Intent\n\n## Outcomes\n\nThe CLI identifies blocking capability failures before release approval.\n\n## Constraints\n\nTBD\n\n## Success Criteria\n\n- Every warning names the artifact section that needs real evidence.\n",
+		"bottleneck/behavior/behavior-spec.md": "# Behavior Specification\n\n## Expected Behavior\n\n### BEHAVIOR-001: Store release evidence\nRefs:\n- INTENT-001\n- ASSURANCE-001\n\nThe system stores validated deployment evidence before rendering summaries.\n\n## Unacceptable Behavior\n\nDescribe behavior the system must prevent.\n",
+		"bottleneck/intent/intent.md":          "# Intent\n\n## Outcomes\n\n### INTENT-001: Identify blocking evidence\nRefs:\n- BEHAVIOR-001\n\nThe CLI identifies blocking capability failures before release approval.\n\n## Constraints\n\nTBD\n\n## Success Criteria\n\n- At least 95% of warnings name the artifact section that needs real evidence.\n",
 		"bottleneck/design/architecture.md":    validDesign,
 	})
 
@@ -121,7 +121,7 @@ func TestPartiallyCompletedArtifactsWarnOnlyForUnchangedOrInsufficientSections(t
 		t.Fatalf("expected Intent WARNING, got %q", intent.Status)
 	}
 	assertOnlyDetails(t, intent.Details, []string{
-		`bottleneck/intent/intent.md section "Constraints" is too thin to validate`,
+		`bottleneck/intent/intent.md section "Constraints" still contains placeholder content`,
 	})
 
 	design := resultForCapability(t, result, "Design")
@@ -151,10 +151,83 @@ func TestValidArtifactsPassContentQualityChecks(t *testing.T) {
 	}
 }
 
+func TestPlaceholderPhraseDetectionIncludesEpicTwoPhrases(t *testing.T) {
+	phrases := []string{
+		"Describe required outcomes",
+		"Describe system constraints",
+		"TODO",
+		"TBD",
+		"Add measurable success criteria",
+	}
+
+	for _, phrase := range phrases {
+		if !containsPlaceholder("Before release: " + phrase) {
+			t.Fatalf("expected placeholder phrase %q to be detected", phrase)
+		}
+	}
+}
+
+func TestMarkdownEvidenceQualityScoresDepth(t *testing.T) {
+	requirements := []sectionContentRequirement{
+		{section: "Outcomes", placeholder: placeholderRequiredOutcomes},
+		{section: "Constraints", placeholder: placeholderSystemConstraints},
+		{section: "Success Criteria", placeholder: placeholderSuccessCriteria},
+	}
+
+	empty := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", "", requirements)
+	headerOnly := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", "# Intent\n\n## Outcomes\n\n## Constraints\n\n## Success Criteria\n", requirements)
+	placeholder := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", templateIntent, requirements)
+	missingID := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", "# Intent\n\n## Outcomes\n\nThe release review identifies every blocking capability.\n\n## Constraints\n\nValidation remains deterministic offline.\n\n## Success Criteria\n\n- At least 95% of warnings include an artifact path.\n", requirements)
+	meaningful := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", validIntent, requirements)
+
+	if empty.Score != 0 {
+		t.Fatalf("expected empty file to score 0, got %d", empty.Score)
+	}
+	if headerOnly.Score <= empty.Score || headerOnly.Score >= placeholder.Score {
+		t.Fatalf("expected header-only score between empty and placeholder, got empty=%d header=%d placeholder=%d", empty.Score, headerOnly.Score, placeholder.Score)
+	}
+	if placeholder.Score <= headerOnly.Score || placeholder.Score >= missingID.Score {
+		t.Fatalf("expected placeholder score between header-only and missing-ID content, got header=%d placeholder=%d missingID=%d", headerOnly.Score, placeholder.Score, missingID.Score)
+	}
+	if missingID.Score >= meaningful.Score {
+		t.Fatalf("expected missing ID to lower score below meaningful content, got missingID=%d meaningful=%d", missingID.Score, meaningful.Score)
+	}
+	if !containsString(placeholder.Details, "bottleneck/intent/intent.md is placeholder-heavy") {
+		t.Fatalf("expected placeholder-heavy detail, got %#v", placeholder.Details)
+	}
+	if !containsString(missingID.Details, "bottleneck/intent/intent.md does not define an INTENT-* evidence ID") {
+		t.Fatalf("expected missing ID detail, got %#v", missingID.Details)
+	}
+	if meaningful.Score != 100 {
+		t.Fatalf("expected meaningful content to score 100, got %d", meaningful.Score)
+	}
+}
+
+func TestVagueIntentLanguageLowersScore(t *testing.T) {
+	requirements := []sectionContentRequirement{
+		{section: "Outcomes", placeholder: placeholderRequiredOutcomes},
+		{section: "Constraints", placeholder: placeholderSystemConstraints},
+		{section: "Success Criteria", placeholder: placeholderSuccessCriteria},
+	}
+
+	vague := "# Intent\n\n## Outcomes\n\n### INTENT-001: Improve release quality\nRefs:\n- BEHAVIOR-001\n\nThe platform should improve release quality with better and easy workflows.\n\n## Constraints\n\nValidation remains deterministic offline.\n\n## Success Criteria\n\nOperators get better release feedback.\n"
+	measurable := validIntent
+
+	vagueQuality := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", vague, requirements)
+	measurableQuality := evaluateMarkdownEvidenceQuality("bottleneck", "intent/intent.md", "Intent", measurable, requirements)
+
+	if vagueQuality.Score >= measurableQuality.Score {
+		t.Fatalf("expected vague intent score below measurable intent, got vague=%d measurable=%d", vagueQuality.Score, measurableQuality.Score)
+	}
+	if !containsString(vagueQuality.Details, `bottleneck/intent/intent.md section "Success Criteria" does not include measurable criteria`) {
+		t.Fatalf("expected measurable criteria detail, got %#v", vagueQuality.Details)
+	}
+}
+
 func TestEngineSystemStatusUsesWarningsWhenNoFailuresExist(t *testing.T) {
 	basePath := t.TempDir()
 	writeValidationProject(t, basePath, map[string]string{
-		"bottleneck/intent/intent.md": templateIntent,
+		"bottleneck/intent/intent.md": "# Intent\n\n## Outcomes\n\n### INTENT-001: Placeholder outcome\nRefs:\n- BEHAVIOR-001\n\nDescribe required outcomes.\n\n## Constraints\n\nDescribe system constraints.\n\n## Success Criteria\n\nAdd measurable success criteria.\n",
 	})
 
 	result := NewEngine(basePath, "default").Validate()
@@ -183,9 +256,9 @@ func writeValidationProject(t *testing.T, basePath string, overrides map[string]
 		"bottleneck/behavior/behavior-spec.md": validBehavior,
 		"bottleneck/intent/intent.md":          validIntent,
 		"bottleneck/design/architecture.md":    validDesign,
-		"bottleneck/assurance/results.json":    "{\n  \"scenarios_total\": 1,\n  \"scenarios_passed\": 1,\n  \"scenarios_failed\": 0,\n  \"failures\": []\n}\n",
-		"bottleneck/security/guardrails.json":  "{\n  \"violations\": 0\n}\n",
-		"bottleneck/execution/telemetry.json":  "{\n  \"adoption_rate\": 0.9,\n  \"error_rate\": 0.01\n}\n",
+		"bottleneck/assurance/results.json":    "{\n  \"scenarios_total\": 1,\n  \"scenarios_passed\": 1,\n  \"scenarios_failed\": 0,\n  \"failures\": [],\n  \"evidence\": [{\"id\":\"ASSURANCE-001\",\"refs\":[\"BEHAVIOR-001\"],\"source\":\"cucumber\",\"status\":\"pass\"}]\n}\n",
+		"bottleneck/security/guardrails.json":  "{\n  \"violations\": 0,\n  \"evidence\": [{\"id\":\"SECURITY-001\",\"refs\":[\"BEHAVIOR-001\"],\"source\":\"scanner\",\"status\":\"pass\"}]\n}\n",
+		"bottleneck/execution/telemetry.json":  "{\n  \"adoption_rate\": 0.9,\n  \"error_rate\": 0.01,\n  \"evidence\": [{\"id\":\"EXECUTION-001\",\"refs\":[\"BEHAVIOR-001\",\"ASSURANCE-001\"],\"source\":\"telemetry\",\"status\":\"pass\"}]\n}\n",
 	}
 
 	for path, content := range overrides {
@@ -201,6 +274,18 @@ func writeValidationProject(t *testing.T, basePath string, overrides map[string]
 			t.Fatalf("failed to write %s: %v", relativePath, err)
 		}
 	}
+}
+
+func withoutTraceEvidence(overrides map[string]string) map[string]string {
+	copy := map[string]string{
+		"bottleneck/assurance/results.json":   "{\n  \"scenarios_total\": 1,\n  \"scenarios_passed\": 1,\n  \"scenarios_failed\": 0,\n  \"failures\": []\n}\n",
+		"bottleneck/security/guardrails.json": "{\n  \"violations\": 0\n}\n",
+		"bottleneck/execution/telemetry.json": "{\n  \"adoption_rate\": 0.9,\n  \"error_rate\": 0.01\n}\n",
+	}
+	for path, content := range overrides {
+		copy[path] = content
+	}
+	return copy
 }
 
 func resultForCapability(t *testing.T, result models.EngineResult, capability string) models.ValidationResult {
@@ -246,4 +331,13 @@ func assertOnlyDetails(t *testing.T, actual []string, expected []string) {
 			t.Fatalf("unexpected warning for completed section in details %#v", actual)
 		}
 	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }

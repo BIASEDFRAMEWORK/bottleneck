@@ -1,0 +1,16 @@
+[
+  {
+    "name": "AI PDF risk summarization",
+    "elements": [
+      {
+        "name": "Ambiguous risk clause is summarized as fact",
+        "type": "scenario",
+        "tags": [{"name": "@BEHAVIOR-001"}],
+        "steps": [
+          {"name": "the PDF contains qualified risk language", "result": {"status": "passed"}},
+          {"name": "the summary preserves uncertainty", "result": {"status": "failed", "error_message": "uncertainty omitted"}}
+        ]
+      }
+    ]
+  }
+]

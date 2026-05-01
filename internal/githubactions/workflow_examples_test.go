@@ -40,6 +40,14 @@ func TestWorkflowExamplesContainExpectedCommands(t *testing.T) {
 					t.Fatalf("expected validate command in %s:\n%s", example, text)
 				}
 			}
+
+			if strings.Contains(example, "gate") {
+				for _, substring := range []string{"diagnose", "--gate release", "--format github", "--format markdown", "bottleneck-diagnosis.md", "<!-- bottleneck-diagnosis -->"} {
+					if !strings.Contains(text, substring) {
+						t.Fatalf("expected %q in %s:\n%s", substring, example, text)
+					}
+				}
+			}
 		})
 	}
 }

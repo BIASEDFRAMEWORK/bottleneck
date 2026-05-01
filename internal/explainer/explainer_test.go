@@ -52,10 +52,10 @@ func TestRenderFiltersByCapability(t *testing.T) {
 		t.Fatalf("Render returned error: %v", err)
 	}
 
-	if !strings.Contains(output, "Capability: Behavior") {
+	if !strings.Contains(output, "Behavior Score:") {
 		t.Fatalf("expected filtered capability in output:\n%s", output)
 	}
-	if strings.Contains(output, "Capability: Assurance") {
+	if strings.Contains(output, "Assurance Score:") {
 		t.Fatalf("did not expect non-filtered capability in output:\n%s", output)
 	}
 }
@@ -87,10 +87,12 @@ func TestRenderIncludesSummaryEvidenceAndActions(t *testing.T) {
 		"Primary Bottleneck: Assurance",
 		"Owner: Assurance Engineer",
 		"Mapped Bottleneck: Validation gaps",
-		"Evidence:",
+		"Evidence found:",
 		"accuracy below threshold",
 		"accuracy: 0.90 (threshold: 0.95)",
-		"Recommended Next Action:",
+		"Evidence missing:",
+		"Score impact:",
+		"Recommendation:",
 		"Fix failing tests or add passing assurance evidence until accuracy meets the selected threshold.",
 	}
 
@@ -137,6 +139,43 @@ func TestRenderSurfacesContentQualityWarningDetails(t *testing.T) {
 	}
 }
 
+func TestRenderIncludesEvidenceQualityMissingAndScoreImpacts(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      models.StatusWarning,
+		PrimaryBottleneck: "Intent",
+		Results: []models.ValidationResult{{
+			Capability: "Intent",
+			Status:     models.StatusWarning,
+			Message:    "intent evidence quality is weak",
+			EvidenceQuality: models.EvidenceQuality{
+				Score:   80,
+				Missing: []string{"Add an INTENT-* heading such as ### INTENT-001: ..."},
+				ScoreImpacts: []models.ScoreImpact{{
+					Reason: "bottleneck/intent/intent.md does not define an INTENT-* evidence ID",
+					Delta:  -20,
+				}},
+			},
+		}},
+	}
+
+	output, err := Render(result, "")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expectedSubstrings := []string{
+		"evidence quality score: 80",
+		"Add an INTENT-* heading such as ### INTENT-001: ...",
+		"- -20 bottleneck/intent/intent.md does not define an INTENT-* evidence ID",
+	}
+	for _, expected := range expectedSubstrings {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("expected %q in output:\n%s", expected, output)
+		}
+	}
+}
+
 func TestRenderIncludesPrimaryDiagnosisWhenNoCapabilityFilter(t *testing.T) {
 	result := models.EngineResult{
 		Environment:       "production",
@@ -160,7 +199,8 @@ func TestRenderIncludesPrimaryDiagnosisWhenNoCapabilityFilter(t *testing.T) {
 	expected := []string{
 		"Primary Diagnosis:",
 		"Weakest Category: Assurance",
-		"Why: There is not enough proof that the expected behavior was tested.",
+		"Top Evidence:",
+		"- missing results.json",
 		"Next Action: Add assurance evidence that maps test or evaluation results to BEHAVIOR-001.",
 	}
 	for _, substring := range expected {
@@ -189,7 +229,57 @@ func TestRenderCapabilityFilterPreservesCapabilitySpecificOutput(t *testing.T) {
 	if strings.Contains(output, "Primary Diagnosis:") {
 		t.Fatalf("did not expect global diagnosis for filtered output:\n%s", output)
 	}
-	if !strings.Contains(output, "Capability: Behavior") {
+	if !strings.Contains(output, "Behavior Score:") {
 		t.Fatalf("expected behavior capability output:\n%s", output)
+	}
+}
+
+func TestRenderUsesEvidenceDrivenSectionsAndAvoidsGenericDescriptions(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      models.StatusFail,
+		PrimaryBottleneck: "Assurance",
+		Results: []models.ValidationResult{{
+			Capability: "Assurance",
+			Status:     models.StatusFail,
+			Message:    "scenarios_failed above threshold",
+			Details: []string{
+				"failure: Ambiguous risk clause was summarized as confirmed exposure",
+				"accuracy: 0.50 (threshold: 0.90)",
+				"scenarios_failed: 1 (allowed: 0)",
+			},
+			EvidenceQuality: models.EvidenceQuality{
+				Score: 90,
+				ScoreImpacts: []models.ScoreImpact{{
+					Reason: "scenarios_failed above threshold",
+					Delta:  -40,
+				}},
+			},
+		}},
+	}
+
+	output, err := Render(result, "")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expected := []string{
+		"Assurance Score:",
+		"Evidence found:",
+		"- bottleneck/assurance/results.json exists",
+		"- failure: Ambiguous risk clause was summarized as confirmed exposure",
+		"Evidence missing:",
+		"Related IDs:",
+		"Score impact:",
+		"- -40 scenarios_failed above threshold",
+		"Recommendation:",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+	if strings.Contains(output, "Assurance proves") || strings.Contains(output, "Intent defines") {
+		t.Fatalf("explain output should avoid generic framework descriptions:\n%s", output)
 	}
 }

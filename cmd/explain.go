@@ -6,6 +6,7 @@ import (
 
 	"bottleneck/internal/explainer"
 	"bottleneck/internal/models"
+	"bottleneck/internal/traceability"
 	"bottleneck/internal/validator"
 
 	"github.com/spf13/cobra"
@@ -21,8 +22,16 @@ var explainCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine := validator.NewEngine(".", explainEnv, validator.WithStrictMode(explainStrict))
 		result := engine.Validate()
+		graph, graphErr := traceability.Build("bottleneck", traceability.Options{
+			Environment: explainEnv,
+			Strict:      explainStrict,
+		})
+		var graphPtr *traceability.Graph
+		if graphErr == nil {
+			graphPtr = &graph
+		}
 
-		output, err := explainer.Render(result, explainCapability)
+		output, err := explainer.RenderWithGraph(result, graphPtr, explainCapability)
 		if err != nil {
 			return err
 		}

@@ -1,0 +1,15 @@
+{
+  "generated_at": "2999-04-30T12:00:00Z",
+  "deployment_frequency": {
+    "deployments": 0,
+    "period_days": 7
+  },
+  "change_failure_rate": 0.35,
+  "error_rate": 0.12,
+  "user_override_rate": 0.20,
+  "adoption_rate": 0.20,
+  "cost": {
+    "total": 250,
+    "budget": 100
+  }
+}

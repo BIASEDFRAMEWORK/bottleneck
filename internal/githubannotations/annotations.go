@@ -8,7 +8,7 @@ import (
 	"bottleneck/internal/models"
 )
 
-var detailPathPattern = regexp.MustCompile(`(bottleneck/[^\s:]+)`)
+var detailPathPattern = regexp.MustCompile(`(bottleneck/[^\s:]+)(?::([0-9]+))?`)
 
 func Render(results []models.ValidationResult) string {
 	var lines []string
@@ -26,7 +26,7 @@ func Render(results []models.ValidationResult) string {
 
 func findingsForResult(result models.ValidationResult) []models.ValidationFinding {
 	if len(result.Findings) > 0 {
-		return result.Findings
+		return normalizeFindings(result)
 	}
 	if result.Status == models.StatusPass {
 		return nil
@@ -39,7 +39,7 @@ func findingsForResult(result models.ValidationResult) []models.ValidationFindin
 
 	var findings []models.ValidationFinding
 	for _, detail := range result.Details {
-		path := pathFromDetail(detail)
+		path, line := locationFromDetail(detail)
 		if path == "" {
 			path = defaultPathForCapability(result.Capability)
 		}
@@ -47,6 +47,7 @@ func findingsForResult(result models.ValidationResult) []models.ValidationFindin
 			Level:   level,
 			Message: detail,
 			Path:    path,
+			Line:    line,
 		})
 	}
 
@@ -59,6 +60,39 @@ func findingsForResult(result models.ValidationResult) []models.ValidationFindin
 	}
 
 	return findings
+}
+
+func normalizeFindings(result models.ValidationResult) []models.ValidationFinding {
+	level := levelForStatus(result.Status)
+	normalized := make([]models.ValidationFinding, 0, len(result.Findings))
+	for _, finding := range result.Findings {
+		if finding.Level == "" {
+			finding.Level = level
+		}
+		if finding.Message == "" {
+			finding.Message = result.Message
+		}
+		if finding.Path == "" {
+			path, line := locationFromDetail(finding.Message)
+			if path == "" {
+				for _, detail := range result.Details {
+					path, line = locationFromDetail(detail)
+					if path != "" {
+						break
+					}
+				}
+			}
+			if path == "" {
+				path = defaultPathForCapability(result.Capability)
+			}
+			finding.Path = path
+			if finding.Line == 0 {
+				finding.Line = line
+			}
+		}
+		normalized = append(normalized, finding)
+	}
+	return normalized
 }
 
 func commandForFinding(finding models.ValidationFinding) string {
@@ -96,11 +130,21 @@ func levelForStatus(status string) string {
 }
 
 func pathFromDetail(detail string) string {
+	path, _ := locationFromDetail(detail)
+	return path
+}
+
+func locationFromDetail(detail string) (string, int) {
 	match := detailPathPattern.FindStringSubmatch(detail)
 	if len(match) < 2 {
-		return ""
+		return "", 0
 	}
-	return strings.TrimRight(match[1], ".,)")
+	path := strings.TrimRight(match[1], ".,)")
+	line := 0
+	if len(match) > 2 && match[2] != "" {
+		fmt.Sscanf(match[2], "%d", &line)
+	}
+	return path, line
 }
 
 func defaultPathForCapability(capability string) string {

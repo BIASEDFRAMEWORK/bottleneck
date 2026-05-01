@@ -2,6 +2,7 @@ package diagnosis
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"bottleneck/internal/models"
@@ -9,6 +10,10 @@ import (
 
 const (
 	HealthyPrimaryBottleneck = "None"
+
+	ConfidenceHigh   = "High"
+	ConfidenceMedium = "Medium"
+	ConfidenceLow    = "Low"
 
 	ScorePass    = 85
 	ScoreWarning = 60
@@ -19,11 +24,14 @@ const (
 )
 
 type Diagnosis struct {
-	PrimaryBottleneck string          `json:"primary_bottleneck"`
-	TiedBottlenecks   []string        `json:"tied_bottlenecks,omitempty"`
-	WhyItMatters      string          `json:"why_it_matters"`
-	RecommendedAction string          `json:"recommended_action"`
-	CategoryScores    []CategoryScore `json:"category_scores"`
+	PrimaryBottleneck    string          `json:"primary_bottleneck"`
+	TiedBottlenecks      []string        `json:"tied_bottlenecks,omitempty"`
+	WhyItMatters         string          `json:"why_it_matters"`
+	RecommendedAction    string          `json:"recommended_action"`
+	ContributingFindings []string        `json:"contributing_findings,omitempty"`
+	Confidence           string          `json:"confidence"`
+	ConfidenceReason     string          `json:"confidence_reason"`
+	CategoryScores       []CategoryScore `json:"category_scores"`
 }
 
 type CategoryScore struct {
@@ -80,6 +88,12 @@ var categoryInfo = map[string]CategoryInfo{
 		WhyItMatters: "Production or delivery evidence is weak. The team may not know whether the change is reliable, adopted, or creating operational friction after release.",
 		HealthyText:  "Execution evidence is strong enough to show the system is working in practice.",
 	},
+	"Traceability": {
+		Owner:        "Release Engineer",
+		Bottleneck:   "Traceability gaps",
+		WhyItMatters: "Traceability connects intent, behavior, assurance, security, and telemetry evidence so release decisions can be audited end to end.",
+		HealthyText:  "Traceability evidence is strong enough to support the current release decision.",
+	},
 }
 
 func Analyze(result models.EngineResult) Diagnosis {
@@ -116,13 +130,17 @@ func Analyze(result models.EngineResult) Diagnosis {
 	for index := range scores {
 		scores[index].Score = clampScore(scoreByCategory[scores[index].Category])
 	}
+	confidence, confidenceReason := Confidence(result)
 
 	if len(scores) == 0 || allStrong(scores) {
 		return Diagnosis{
-			PrimaryBottleneck: HealthyPrimaryBottleneck,
-			WhyItMatters:      "All assessed delivery categories have enough evidence to support the current release decision.",
-			RecommendedAction: "Keep evidence current as intent, behavior, implementation, and production signals change.",
-			CategoryScores:    scores,
+			PrimaryBottleneck:    HealthyPrimaryBottleneck,
+			WhyItMatters:         "All assessed delivery categories have enough evidence to support the current release decision.",
+			RecommendedAction:    "Keep evidence current as intent, behavior, implementation, and production signals change.",
+			ContributingFindings: ContributingFindings(result, HealthyPrimaryBottleneck),
+			Confidence:           confidence,
+			ConfidenceReason:     confidenceReason,
+			CategoryScores:       scores,
 		}
 	}
 
@@ -138,11 +156,14 @@ func Analyze(result models.EngineResult) Diagnosis {
 	validation := resultsByCategory[primary]
 
 	return Diagnosis{
-		PrimaryBottleneck: primary,
-		TiedBottlenecks:   tiedIfMultiple(tied),
-		WhyItMatters:      WhyItMatters(primary),
-		RecommendedAction: RecommendedAction(validation),
-		CategoryScores:    scores,
+		PrimaryBottleneck:    primary,
+		TiedBottlenecks:      tiedIfMultiple(tied),
+		WhyItMatters:         WhyItMatters(primary),
+		RecommendedAction:    RecommendedAction(validation),
+		ContributingFindings: ContributingFindings(result, primary),
+		Confidence:           confidence,
+		ConfidenceReason:     confidenceReason,
+		CategoryScores:       scores,
 	}
 }
 
@@ -173,6 +194,8 @@ func RecommendedAction(validation models.ValidationResult) string {
 	combined := strings.TrimSpace(message + "\n" + details)
 
 	switch {
+	case category == "Assurance" && strings.Contains(combined, "ambiguous risk"):
+		return "Add or fix evaluation evidence for BEHAVIOR-001 so ambiguous financial risk language is flagged as uncertain."
 	case strings.Contains(combined, "not linked") ||
 		strings.Contains(combined, "references missing") ||
 		strings.Contains(combined, "cannot reference") ||
@@ -224,6 +247,206 @@ func HasCategoryScore(category string, scores []CategoryScore) bool {
 	return false
 }
 
+func ContributingFindings(result models.EngineResult, primary string) []string {
+	if primary == HealthyPrimaryBottleneck {
+		return []string{"All assessed delivery categories have enough evidence to support the current release decision."}
+	}
+
+	var findings []string
+	for _, validation := range result.Results {
+		if validation.Capability == primary {
+			findings = appendFindingSources(findings, validation)
+		}
+	}
+	for _, validation := range result.Results {
+		if validation.Capability == "Traceability" && traceabilityResultRelatesTo(validation, primary) {
+			findings = appendFindingSources(findings, validation)
+		}
+	}
+	if len(findings) == 0 {
+		findings = append(findings, Info(primary).Bottleneck)
+	}
+
+	return firstUnique(findings, 3)
+}
+
+func appendFindingSources(findings []string, validation models.ValidationResult) []string {
+	for _, impact := range validation.EvidenceQuality.ScoreImpacts {
+		findings = append(findings, impact.Reason)
+	}
+	for _, finding := range validation.Findings {
+		findings = append(findings, finding.Message)
+	}
+	if validation.Capability == "Assurance" {
+		findings = append(findings, validation.Details...)
+		if validation.Message != "" && validation.Status != models.StatusPass {
+			findings = append(findings, validation.Message)
+		}
+		findings = append(findings, validation.EvidenceQuality.Missing...)
+		return findings
+	}
+	if validation.Message != "" && validation.Status != models.StatusPass {
+		findings = append(findings, validation.Message)
+	}
+	findings = append(findings, validation.Details...)
+	findings = append(findings, validation.EvidenceQuality.Missing...)
+	return findings
+}
+
+func traceabilityResultRelatesTo(validation models.ValidationResult, primary string) bool {
+	for _, detail := range validation.Details {
+		if categoryFromTraceabilityDetail(detail) == primary {
+			return true
+		}
+	}
+	for _, finding := range validation.Findings {
+		if categoryFromTraceabilityDetail(finding.Message) == primary {
+			return true
+		}
+	}
+	for _, impact := range validation.EvidenceQuality.ScoreImpacts {
+		if categoryFromTraceabilityDetail(impact.Reason) == primary {
+			return true
+		}
+	}
+	return false
+}
+
+func firstUnique(values []string, limit int) []string {
+	seen := map[string]bool{}
+	unique := make([]string, 0, limit)
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+		if len(unique) == limit {
+			break
+		}
+	}
+	return unique
+}
+
+func Confidence(result models.EngineResult) (string, string) {
+	meaningful := 0
+	for _, category := range categoryOrder {
+		if validation, ok := validationForCapability(result, category); ok && hasMeaningfulEvidence(validation) {
+			meaningful++
+		}
+	}
+
+	traceabilityStatus := traceabilityStatus(result)
+	stale := hasStaleEvidence(result)
+
+	confidence := ConfidenceLow
+	if meaningful >= 4 {
+		confidence = ConfidenceMedium
+	}
+	if meaningful == len(categoryOrder) {
+		confidence = ConfidenceHigh
+	}
+	if traceabilityStatus == models.StatusWarning || traceabilityStatus == models.StatusFail {
+		confidence = downgradeConfidence(confidence)
+	}
+	if stale {
+		confidence = downgradeConfidence(confidence)
+	}
+
+	return confidence, confidenceReason(meaningful, traceabilityStatus, stale)
+}
+
+func validationForCapability(result models.EngineResult, capability string) (models.ValidationResult, bool) {
+	for _, validation := range result.Results {
+		if validation.Capability == capability {
+			return validation, true
+		}
+	}
+	return models.ValidationResult{}, false
+}
+
+func hasMeaningfulEvidence(validation models.ValidationResult) bool {
+	combined := strings.ToLower(strings.TrimSpace(validation.Message + "\n" + strings.Join(validation.Details, "\n") + "\n" + strings.Join(validation.EvidenceQuality.Details, "\n")))
+	if validation.EvidenceQuality.Score > 0 {
+		return validation.EvidenceQuality.Score >= strongScoreThreshold
+	}
+	if validation.Status == models.StatusPass {
+		return true
+	}
+	if strings.Contains(combined, "missing") ||
+		strings.Contains(combined, "invalid") ||
+		strings.Contains(combined, "empty") ||
+		strings.Contains(combined, "required sections missing") ||
+		strings.Contains(combined, "placeholder") ||
+		strings.Contains(combined, "too thin") ||
+		strings.Contains(combined, "header-only") {
+		return false
+	}
+	return len(validation.Details) > 0 || len(validation.Findings) > 0 || validation.Message != ""
+}
+
+func traceabilityStatus(result models.EngineResult) string {
+	for _, validation := range result.Results {
+		if validation.Capability == "Traceability" {
+			return validation.Status
+		}
+	}
+	return models.StatusPass
+}
+
+func hasStaleEvidence(result models.EngineResult) bool {
+	for _, validation := range result.Results {
+		combined := strings.ToLower(validation.Message + "\n" + strings.Join(validation.Details, "\n"))
+		if strings.Contains(combined, "stale") || strings.Contains(combined, "outdated") || strings.Contains(combined, "expired") {
+			return true
+		}
+	}
+	return false
+}
+
+func downgradeConfidence(confidence string) string {
+	switch confidence {
+	case ConfidenceHigh:
+		return ConfidenceMedium
+	case ConfidenceMedium:
+		return ConfidenceLow
+	default:
+		return ConfidenceLow
+	}
+}
+
+func confidenceReason(meaningful int, traceabilityStatus string, stale bool) string {
+	total := len(categoryOrder)
+	if meaningful < 4 {
+		return formatEvidenceCountReason("Only", meaningful, total)
+	}
+	if meaningful < total {
+		return formatEvidenceCountReason("", meaningful, total)
+	}
+	if traceabilityStatus == models.StatusFail {
+		return "All 6 evidence categories are present, but traceability has broken references."
+	}
+	if traceabilityStatus == models.StatusWarning {
+		return "All 6 evidence categories are present, but traceability has warnings."
+	}
+	if stale {
+		return "All 6 evidence categories contain meaningful content, but some evidence appears stale."
+	}
+	return "All 6 evidence categories contain meaningful, connected evidence."
+}
+
+func formatEvidenceCountReason(prefix string, count int, total int) string {
+	if prefix == "" {
+		return strings.TrimSpace(strings.Join([]string{formatInt(count), "of", formatInt(total), "evidence categories contain meaningful content."}, " "))
+	}
+	return strings.TrimSpace(strings.Join([]string{prefix, formatInt(count), "of", formatInt(total), "evidence categories contain meaningful content."}, " "))
+}
+
+func formatInt(value int) string {
+	return strconv.Itoa(value)
+}
+
 func ScoreValidation(validation models.ValidationResult) int {
 	return scoreValidation(validation)
 }
@@ -233,9 +456,14 @@ func scoreValidation(validation models.ValidationResult) int {
 	message := strings.ToLower(validation.Message)
 	details := strings.ToLower(strings.Join(validation.Details, "\n"))
 	combined := strings.TrimSpace(message + "\n" + details)
+	if validation.EvidenceQuality.Score > 0 {
+		score = minInt(score, validation.EvidenceQuality.Score)
+	}
 
 	if validation.Status == models.StatusPass {
-		score += minInt(15, len(validation.Details)*3)
+		if validation.EvidenceQuality.Score == 0 {
+			score += minInt(15, len(validation.Details)*3)
+		}
 		if strings.Contains(combined, "non-placeholder") {
 			score += 5
 		}
@@ -264,6 +492,11 @@ func scoreValidation(validation models.ValidationResult) int {
 	}
 	if len(validation.Details) == 0 && validation.Status != models.StatusPass {
 		score -= 5
+	}
+	for _, impact := range validation.EvidenceQuality.ScoreImpacts {
+		if impact.Delta < 0 && !strings.Contains(combined, strings.ToLower(impact.Reason)) {
+			score += impact.Delta
+		}
 	}
 
 	return clampScore(score)
@@ -310,6 +543,12 @@ func applyTraceabilityAdjustments(scoreByCategory map[string]int, traceabilityRe
 
 func categoryFromTraceabilityDetail(detail string) string {
 	lower := strings.ToLower(detail)
+	if strings.Contains(lower, "no assurance result references") ||
+		strings.Contains(lower, "not linked to assurance evidence") ||
+		strings.Contains(lower, "without assurance") {
+		return "Assurance"
+	}
+
 	pathToCategory := map[string]string{
 		"bottleneck/behavior/":  "Behavior",
 		"bottleneck/intent/":    "Intent",
@@ -399,6 +638,8 @@ func missingEvidenceAction(category string) string {
 		return "Add guardrail evidence in bottleneck/security/guardrails.json and confirm violations are zero."
 	case "Execution":
 		return "Add execution telemetry in bottleneck/execution/telemetry.json for adoption and error rate."
+	case "Traceability":
+		return "Add evidence IDs and Refs links across intent, behavior, assurance, security, and execution artifacts."
 	default:
 		return "Add the missing evidence artifact and rerun validation."
 	}
@@ -447,7 +688,7 @@ func disconnectedEvidenceAction(category string) string {
 	case "Assurance":
 		return "Link assurance results to the behavior IDs they verify."
 	case "Security":
-		return "Link security evidence to the behavior or assurance evidence it protects."
+		return "Link security evidence to the behavior or intent evidence it protects."
 	case "Execution":
 		return "Link execution telemetry to the behavior or assurance evidence it validates in production."
 	default:

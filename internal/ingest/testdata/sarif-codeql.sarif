@@ -1,0 +1,26 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "rules": [
+            {
+              "id": "go/path-injection",
+              "name": "Path injection",
+              "properties": {"problem.severity": "error"}
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "go/path-injection",
+          "properties": {"security-severity": "7.5"},
+          "message": {"text": "Path built from user-controlled input"}
+        }
+      ]
+    }
+  ]
+}

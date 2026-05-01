@@ -1,8 +1,9 @@
 # bottleneck
 
-bottleneck is an SDLC scorecard application for organizations adopting AI-era software delivery. It examines a code base and the surrounding delivery system, then turns evidence from development, security, operations, and product tools into release-readiness scorecards.
+BIASED is the evidence model.
+Bottleneck is the CLI that diagnoses delivery risk using that model.
 
-BIASED is the evidence framework behind bottleneck.
+Bottleneck evaluates a repo or release using local evidence artifacts. It diagnoses release readiness, hidden delivery risk, and evidence gaps before a team treats a change as ready to ship.
 
 BIASED stands for:
 
@@ -13,15 +14,35 @@ BIASED stands for:
 - Security
 - Execution
 
-The framework defines what evidence matters. bottleneck delivers that evidence by validating local artifacts today and, over time, integrating with the tools organizations already use to plan, build, secure, operate, and measure software.
+BIASED defines what evidence matters. Bottleneck diagnoses delivery risk from local evidence artifacts today and can grow into broader scorecard surfaces as more tool signals are connected.
 
-## Product And Framework
+## What Bottleneck Evaluates
 
-BIASED is an evidence framework for AI-era software delivery. It helps teams prove that software is aligned to business intent, validated against expected behavior, designed coherently, governed by policy, secured before release, and measured in production.
+Bottleneck evaluates one repo or release at a time. Useful scopes include:
 
-bottleneck is the application implementation of that framework. It is not a replacement for GitHub, Jira, security scanners, observability platforms, product analytics, or CI/CD. It connects their signals back to framework evidence categories and presents the result as an SDLC scorecard.
+- single application repo
+- service repo
+- AI feature repo
+- platform repo
 
-The current implementation is a Go CLI that validates Git-based framework artifacts. The product direction is a broader scorecard surface that can ingest:
+Team and organization-level views can come later by aggregating repo scorecards.
+
+## AI And Non-AI Systems
+
+Bottleneck works for any software system, but it is especially useful for AI-enabled systems where behavior, drift, evaluation, and governance cannot be inferred from code alone.
+
+Examples:
+
+- An AI PDF Risk Summarizer needs evidence that ambiguous financial risk language is flagged instead of summarized as fact.
+- A payments service needs evidence that checkout behavior, test results, security checks, and production telemetry are connected before release.
+
+## Product And Evidence Model
+
+BIASED is the evidence model for release decisions. It helps teams prove that software is aligned to business intent, validated against expected behavior, designed coherently, governed by policy, secured before release, and measured in production.
+
+Bottleneck is the CLI implementation of that model. It is not a replacement for GitHub, Jira, security scanners, observability platforms, product analytics, or CI/CD. It connects local evidence back to BIASED categories and presents the result as a delivery-risk diagnosis and release-readiness scorecard.
+
+The current implementation is a Go CLI that diagnoses delivery risk from Git-based local artifacts. Future product direction includes broader scorecard surfaces that can ingest:
 
 - codebase structure and repository changes
 - BDD and test results
@@ -38,7 +59,7 @@ bottleneck answers one question:
 
 > Where is the delivery system blocked, and what evidence proves it?
 
-The CLI does not run tests, execute BDD frameworks, call external services, or store data in a database yet. It validates the artifacts and outcomes produced by the team and by external tools.
+The CLI does not run tests, execute BDD frameworks, call external services, or store data in a database yet. It reads the artifacts and outcomes produced by the team and by external tools, then validates them as evidence for a release decision.
 
 ## Core Model
 
@@ -52,7 +73,7 @@ Execution reveals truth. Truth updates Behavior and Intent.
 
 ### `bottleneck init`
 
-Creates the local framework artifact structure:
+Creates the local evidence artifact structure with a realistic starter sample: `AI PDF Risk Summarizer`.
 
 ```text
 bottleneck/
@@ -67,9 +88,21 @@ bottleneck/
   docs/validation.md
 ```
 
+First run:
+
+```sh
+bottleneck init
+bottleneck diagnose
+bottleneck scorecard
+```
+
+The generated sample intentionally leaves Assurance weak: one evaluation fails because ambiguous financial risk language was summarized as fact. This gives `diagnose` a real primary bottleneck to explain before you replace the starter evidence with your own system context.
+
+Start by editing `bottleneck/intent/intent.md`, then update behavior, assurance, security, and execution artifacts with project-specific evidence.
+
 ### `bottleneck validate`
 
-Validates all six framework capabilities and prints system status.
+Validates the local BIASED evidence categories and prints system status.
 
 Select thresholds with an environment:
 
@@ -86,21 +119,22 @@ Example:
 Behavior: PASS
 Intent: PASS
 Design: PASS
-Assurance: PASS
-  accuracy: 1.00 (threshold: 0.90)
-  scenarios_failed: 0 (allowed: 0)
+Assurance: FAIL (scenarios_failed above threshold)
+  failure: Ambiguous risk clause was summarized as confirmed exposure
+  accuracy: 0.50 (threshold: 0.90)
+  scenarios_failed: 1 (allowed: 0)
 Security: PASS
 Execution: PASS
 
-System Status: PASS
-Primary Bottleneck: None
+System Status: FAIL
+Primary Bottleneck: Assurance
 Environment: default
 ```
 
 Exit behavior:
 
-- Exit `0` when all capabilities are `PASS` or `WARNING`
-- Exit `1` when any capability is `FAIL`
+- Exit `0` when all evidence categories are `PASS` or `WARNING`
+- Exit `1` when any evidence category is `FAIL`
 
 ### `bottleneck status`
 
@@ -124,12 +158,13 @@ Ingest external tool output into normalized bottleneck artifacts.
 
 ```sh
 bottleneck ingest cucumber --file reports/cucumber.json
+bottleneck ingest sarif --file results/codeql.sarif
 bottleneck ingest codeql --file results/codeql.sarif
 bottleneck ingest test-summary --file results/test-summary.json
 bottleneck ingest telemetry --file results/telemetry.json
 ```
 
-Use `--dry-run` to parse and inspect normalized evidence without writing artifact files, and `--out` to override the default output path.
+Use `--dry-run` to parse and inspect normalized evidence without writing artifact files, and `--out` to override the default output path. Cucumber ingestion writes assurance evidence, SARIF/CodeQL ingestion writes security evidence, and telemetry ingestion writes execution evidence.
 
 ### `bottleneck explain`
 
@@ -150,11 +185,31 @@ The command reuses the validation engine and adds:
 - mapped bottlenecks
 - why-this-matters explanation
 - evidence/details
+- evidence-quality score, missing evidence, and score impacts
 - one recommended next action
+
+### `bottleneck diagnose`
+
+Shows the shortest diagnosis path: primary bottleneck, top contributing findings, recommended next action, and confidence level.
+
+Examples:
+
+```sh
+bottleneck diagnose
+bottleneck diagnose --env=production
+bottleneck diagnose --format=json
+bottleneck diagnose --format markdown
+bottleneck diagnose --format github
+bottleneck diagnose --env=production --strict --gate release
+```
+
+`diagnose` exits non-zero only when validation fails. Warning-only diagnosis remains a zero exit unless `--strict` promotes warnings to failures.
+
+Use `bottleneck diagnose --format markdown` for compact PR comments, GitHub Actions Step Summary output, or release notes. The Markdown output includes the primary bottleneck, category scores, top findings, and the recommended next action. Use `bottleneck diagnose --format github` to emit GitHub Actions annotations. Use `bottleneck diagnose --gate release` to evaluate configured release gate thresholds.
 
 ### `bottleneck scorecard`
 
-Summarizes release readiness in an evidence-backed scorecard with deterministic diagnosis, category scores, resolved thresholds, release recommendation, evidence counts, missing evidence, reasons, and recommended actions.
+Summarizes release readiness in an evidence-backed scorecard with deterministic diagnosis, category gauges, category scores, resolved thresholds, release recommendation, evidence counts, missing evidence, score impacts, reasons, and recommended actions.
 
 Examples:
 
@@ -182,27 +237,27 @@ Supported views:
 
 Release recommendations:
 
-- `Proceed`: all assessed required capabilities pass
-- `Conditional`: no failures, but one or more capabilities warn
-- `Block`: one or more capabilities fail
+- `Proceed`: all assessed required evidence categories pass
+- `Conditional`: no failures, but one or more evidence categories warn
+- `Block`: one or more evidence categories fail
 - `Unknown`: scorecard evidence is unavailable or not assessed
 
 Like `validate`, `scorecard` returns a non-zero exit code when the system is failing.
 
-Diagnosis scoring is derived from validation output. Passing BIASED categories start high, warnings score in the middle, failures score low, and missing, placeholder, weak, stale, or disconnected evidence reduces the score further. The primary bottleneck is the weakest BIASED category using this tie priority: Assurance, Security, Behavior, Intent, Execution, Design. When all assessed BIASED categories are strong, the primary bottleneck is `None`.
+Diagnosis scoring is derived from validation output. Passing BIASED categories start high, warnings score in the middle, failures score low, and missing, placeholder-heavy, thin, vague, unmeasurable, or disconnected evidence reduces the score further. Missing expected evidence IDs and broken traceability refs are included in score impacts. The primary bottleneck is the weakest BIASED category using this tie priority: Assurance, Security, Behavior, Intent, Execution, Design. When all assessed BIASED categories are strong, the primary bottleneck is `None`.
 
 When `--github-annotations` is used, `validate` and `scorecard` emit GitHub Actions workflow commands for warning and failing validation results. Failing results are emitted as `::error`; warning results are emitted as `::warning`. File paths are included when bottleneck can tie a finding to an artifact.
 
 ### `bottleneck trace`
 
-Traces a stable evidence ID across intent, behavior, assurance, security, and execution artifacts.
+Traces a stable evidence ID across intent, behavior, design, assurance, security, and execution artifacts.
 
 Examples:
 
 ```sh
-bottleneck trace INTENT-001
-bottleneck trace BEHAVIOR-001 --env=production
-bottleneck trace ASSURANCE-001 --format=json
+bottleneck trace --id INTENT-001
+bottleneck trace --id BEHAVIOR-001 --env=production
+bottleneck trace --id ASSURANCE-001 --format=json
 ```
 
 Supported formats:
@@ -211,6 +266,7 @@ Supported formats:
 - `json`
 
 Unknown IDs return a non-zero exit code with a useful error.
+Positional IDs such as `bottleneck trace BEHAVIOR-001` remain supported.
 
 ## GitHub Actions Integration
 
@@ -226,14 +282,25 @@ The PR gate uses the existing CLI exit behavior:
 
 ```sh
 go build -o bottleneck .
+set +e
 ./bottleneck validate --env=production --strict --github-annotations
+VALIDATE_EXIT=$?
+./bottleneck diagnose --env=production --strict --gate release --format markdown > bottleneck-diagnosis.md
+DIAGNOSE_EXIT=$?
+./bottleneck diagnose --env=production --strict --format github
 ./bottleneck scorecard --env=production --view=governance --format=markdown > bottleneck-scorecard.md
+SCORECARD_EXIT=$?
+cat bottleneck-diagnosis.md >> "$GITHUB_STEP_SUMMARY"
+echo >> "$GITHUB_STEP_SUMMARY"
 cat bottleneck-scorecard.md >> "$GITHUB_STEP_SUMMARY"
+if [ "$VALIDATE_EXIT" -ne 0 ]; then exit "$VALIDATE_EXIT"; fi
+if [ "$DIAGNOSE_EXIT" -ne 0 ]; then exit "$DIAGNOSE_EXIT"; fi
+if [ "$SCORECARD_EXIT" -ne 0 ]; then exit "$SCORECARD_EXIT"; fi
 ```
 
 `--env=dev`, `--env=stage`, and `--env=production` select thresholds from `bottleneck/config.yaml`. `--strict` promotes placeholder and insufficient-content findings from warnings to failures, which is useful for protected PR gates. Warnings do not fail jobs unless strict mode or production traceability rules promote them to failures.
 
-The PR comment workflow uses `actions/github-script` and the hidden marker `<!-- bottleneck-scorecard -->` so repeated runs update one comment instead of creating duplicates. It needs:
+The PR comment workflow uses `actions/github-script` and the hidden marker `<!-- bottleneck-diagnosis -->` so repeated runs update one comment instead of creating duplicates. The comment can include the compact diagnosis first and the detailed scorecard below it. It needs:
 
 - `contents: read`
 - `pull-requests: write`
@@ -273,7 +340,7 @@ Must exist, must not be empty, and must contain at least one Markdown section he
 
 Artifact: `bottleneck/assurance/results.json`
 
-bottleneck does not run tests. BDD tests are executed externally by tools such as Cucumber, SpecFlow, Cucumber.js, or Behave. bottleneck validates their output against assurance rules defined by the BIASED framework.
+bottleneck does not run tests. BDD tests are executed externally by tools such as Cucumber, SpecFlow, Cucumber.js, or Behave. bottleneck validates their output against assurance rules defined by the BIASED model.
 
 Required schema:
 
@@ -303,12 +370,43 @@ environments:
     execution:
       max_error_rate: 0.05
       min_adoption: 0.5
+      telemetry:
+        max_age_hours: 168
+        min_deployments_per_week: 1
+        max_change_failure_rate: 0.15
+        max_error_rate: 0.05
+        max_user_override_rate: 0.10
+        min_adoption_rate: 0.50
+        max_budget_variance: 0.20
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 5
+        max_low: 20
+        fail_on_unknown_severity: false
+    gate:
+      release:
+        min_primary_score: 60
+        required_categories:
+          - Intent
+          - Behavior
+          - Assurance
+          - Security
+          - Execution
+        require_traceability: true
+        require_governance: false
   production:
     assurance:
       min_accuracy: 0.95
+    gate:
+      release:
+        min_primary_score: 75
+        require_traceability: true
+        require_governance: true
 ```
 
-`bottleneck validate --env=<environment>` starts from `default` and overlays only the explicitly configured values for the selected environment.
+`bottleneck validate --env=<environment>` starts from `default` and overlays only the explicitly configured values for the selected environment. Gate, SARIF, and telemetry settings are optional; older configs use safe defaults.
 
 ### Security
 
@@ -318,11 +416,19 @@ Required schema:
 
 ```json
 {
-  "violations": 0
+  "violations": 0,
+  "findings": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "note": 0,
+    "unknown": 0
+  }
 }
 ```
 
-Fails when `violations > 0`.
+For simple guardrail evidence without a `findings` map, Security fails when `violations > 0`. SARIF-ingested evidence uses configured severity thresholds for critical, high, medium, low, and unknown findings.
 
 ### Execution
 
@@ -332,12 +438,29 @@ Required schema:
 
 ```json
 {
-  "adoption_rate": 0.9,
-  "error_rate": 0.01
+  "generated_at": "2026-04-30T12:00:00Z",
+  "window": {
+    "start": "2026-04-23T00:00:00Z",
+    "end": "2026-04-30T00:00:00Z"
+  },
+  "deployment_frequency": {
+    "deployments": 7,
+    "period_days": 7
+  },
+  "change_failure_rate": 0.05,
+  "adoption_rate": 0.72,
+  "error_rate": 0.02,
+  "user_override_rate": 0.03,
+  "cost": {
+    "total": 120.5,
+    "currency": "USD",
+    "budget": 150,
+    "trend": "stable"
+  }
 }
 ```
 
-Fails when `error_rate` exceeds the configured `max_error_rate`. Returns `WARNING` when `adoption_rate` is below the configured `min_adoption`.
+Older telemetry files with only `adoption_rate` and `error_rate` still validate. Extended telemetry also checks freshness, deployment frequency, change failure rate, user override rate, and budget variance. Failing reliability thresholds return `FAIL`; partial, stale, low-adoption, high-override, or over-budget telemetry returns `WARNING`.
 
 ### Traceability
 
@@ -378,7 +501,7 @@ Traceability fails on duplicate IDs, invalid IDs, invalid references, or referen
 
 ## Continuous Validation Loops
 
-The BIASED framework treats release as the beginning of continuous validation, not the end of delivery.
+The BIASED model treats release as the beginning of continuous validation, not the end of delivery.
 
 Core loops:
 
@@ -402,6 +525,7 @@ Run locally:
 go run . init
 go run . validate
 go run . validate --env=production
+go run . diagnose
 go run . explain
 go run . scorecard
 go run . status
@@ -409,7 +533,7 @@ go run . status
 
 ## Documentation
 
-Additional framework and validation references:
+Additional strategy and validation references:
 
 - `bottleneck-strategy-v1.md`
 - `bottleneck/docs/validation.md`

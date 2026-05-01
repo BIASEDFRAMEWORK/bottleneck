@@ -38,15 +38,25 @@ jobs:
           set +e
           ./bottleneck validate --env="$BOTTLENECK_ENV" --strict --github-annotations
           VALIDATE_EXIT=$?
+          ./bottleneck diagnose --env="$BOTTLENECK_ENV" --strict --gate release --format markdown > bottleneck-diagnosis.md
+          DIAGNOSE_EXIT=$?
+          ./bottleneck diagnose --env="$BOTTLENECK_ENV" --strict --format github
           ./bottleneck scorecard --env="$BOTTLENECK_ENV" --view=governance --format=markdown > bottleneck-scorecard.md
           SCORECARD_EXIT=$?
           {
-            echo "<!-- bottleneck-scorecard -->"
+            echo "<!-- bottleneck-diagnosis -->"
+            cat bottleneck-diagnosis.md
+            echo
             cat bottleneck-scorecard.md
           } > bottleneck-pr-comment.md
+          cat bottleneck-diagnosis.md >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
           cat bottleneck-scorecard.md >> "$GITHUB_STEP_SUMMARY"
           if [ "$VALIDATE_EXIT" -ne 0 ]; then
             exit "$VALIDATE_EXIT"
+          fi
+          if [ "$DIAGNOSE_EXIT" -ne 0 ]; then
+            exit "$DIAGNOSE_EXIT"
           fi
           if [ "$SCORECARD_EXIT" -ne 0 ]; then
             exit "$SCORECARD_EXIT"
@@ -58,7 +68,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const marker = '<!-- bottleneck-scorecard -->';
+            const marker = '<!-- bottleneck-diagnosis -->';
             const body = fs.readFileSync('bottleneck-pr-comment.md', 'utf8');
             const {owner, repo} = context.repo;
             const issue_number = context.payload.pull_request.number;

@@ -23,6 +23,13 @@ type Report struct {
 	SystemStatus         string          `json:"system_status"`
 	PrimaryBottleneck    string          `json:"primary_bottleneck"`
 	TiedBottlenecks      []string        `json:"tied_bottlenecks"`
+	Rule                 string          `json:"rule,omitempty"`
+	Reason               string          `json:"reason"`
+	Impact               string          `json:"impact"`
+	NextAction           string          `json:"next_action"`
+	InspectCommand       string          `json:"inspect_command"`
+	RelevantEvidenceIDs  []string        `json:"relevant_evidence_ids"`
+	SupportingIssues     []string        `json:"supporting_issues"`
 	WhyItMatters         string          `json:"why_it_matters"`
 	ContributingFindings []string        `json:"contributing_findings"`
 	RecommendedAction    string          `json:"recommended_action"`
@@ -41,6 +48,14 @@ func BuildReport(result models.EngineResult) Report {
 	if findings == nil {
 		findings = []string{}
 	}
+	relevantIDs := append([]string{}, diagnosis.RelevantEvidenceIDs...)
+	if relevantIDs == nil {
+		relevantIDs = []string{}
+	}
+	supportingIssues := append([]string{}, diagnosis.SupportingIssues...)
+	if supportingIssues == nil {
+		supportingIssues = []string{}
+	}
 	scores := append([]CategoryScore{}, diagnosis.CategoryScores...)
 	if scores == nil {
 		scores = []CategoryScore{}
@@ -51,6 +66,13 @@ func BuildReport(result models.EngineResult) Report {
 		SystemStatus:         result.SystemStatus,
 		PrimaryBottleneck:    diagnosis.PrimaryBottleneck,
 		TiedBottlenecks:      tied,
+		Rule:                 diagnosis.Rule,
+		Reason:               diagnosis.Reason,
+		Impact:               diagnosis.Impact,
+		NextAction:           diagnosis.NextAction,
+		InspectCommand:       diagnosis.InspectCommand,
+		RelevantEvidenceIDs:  relevantIDs,
+		SupportingIssues:     supportingIssues,
 		WhyItMatters:         diagnosis.WhyItMatters,
 		ContributingFindings: findings,
 		RecommendedAction:    diagnosis.RecommendedAction,
@@ -82,24 +104,21 @@ func renderText(report Report) string {
 	if len(report.TiedBottlenecks) > 0 {
 		lines = append(lines, fmt.Sprintf("Tied Bottlenecks: %s", strings.Join(report.TiedBottlenecks, ", ")))
 	}
-	lines = append(lines, "", "Contributing findings:")
-	if len(report.ContributingFindings) == 0 {
-		lines = append(lines, "1. No specific findings were reported.")
-	} else {
-		for index, finding := range report.ContributingFindings {
-			lines = append(lines, fmt.Sprintf("%d. %s", index+1, finding))
-		}
-	}
 	lines = append(lines,
-		"",
-		"Recommended next action:",
-		report.RecommendedAction,
-		"",
-		fmt.Sprintf("Diagnosis Confidence: %s", report.Confidence),
-		"",
-		"Reason:",
-		report.ConfidenceReason,
+		fmt.Sprintf("Reason: %s", report.Reason),
+		fmt.Sprintf("Impact: %s", report.Impact),
+		fmt.Sprintf("Next Action: %s", effectiveNextAction(report)),
+		fmt.Sprintf("Inspect: %s", report.InspectCommand),
 	)
+	if len(report.RelevantEvidenceIDs) > 0 {
+		lines = append(lines, fmt.Sprintf("Relevant Evidence: %s", strings.Join(report.RelevantEvidenceIDs, ", ")))
+	}
+
+	lines = append(lines, "", "Supporting Issues:")
+	appendNumberedLines(&lines, report.SupportingIssues, "No additional supporting issues were reported.")
+	lines = append(lines, "", "Contributing Findings:")
+	appendNumberedLines(&lines, report.ContributingFindings, "No specific findings were reported.")
+	lines = append(lines, "", fmt.Sprintf("Diagnosis Confidence: %s", report.Confidence), "Confidence Reason:", report.ConfidenceReason)
 	return strings.Join(lines, "\n")
 }
 
@@ -128,9 +147,31 @@ func renderMarkdown(report Report) string {
 	}
 	lines = append(lines,
 		"",
+		"### Reason",
+		"",
+		markdownText(report.Reason),
+		"",
+		"### Impact",
+		"",
+		markdownText(report.Impact),
+		"",
+		"### Recommended Next Action",
+		"",
+		markdownText(effectiveNextAction(report)),
+		"",
+		"### Inspect",
+		"",
+		fmt.Sprintf("`%s`", markdownText(report.InspectCommand)),
+		"",
+		"### Relevant Evidence",
+		"",
+	)
+	appendMarkdownBullets(&lines, report.RelevantEvidenceIDs, "None.")
+	lines = append(lines,
+		"",
 		"### Why It Matters",
 		"",
-		report.WhyItMatters,
+		markdownText(report.WhyItMatters),
 		"",
 		"### Category Scores",
 		"",
@@ -162,15 +203,44 @@ func renderMarkdown(report Report) string {
 	}
 	lines = append(lines,
 		"",
-		"### Recommended Next Action",
+		"### Supporting Issues",
 		"",
-		markdownText(report.RecommendedAction),
+	)
+	appendMarkdownBullets(&lines, report.SupportingIssues, "None.")
+	lines = append(lines,
 		"",
 		"### Confidence Reason",
 		"",
 		markdownText(report.ConfidenceReason),
 	)
 	return strings.Join(lines, "\n")
+}
+
+func effectiveNextAction(report Report) string {
+	if strings.TrimSpace(report.NextAction) != "" {
+		return report.NextAction
+	}
+	return report.RecommendedAction
+}
+
+func appendNumberedLines(lines *[]string, values []string, empty string) {
+	if len(values) == 0 {
+		*lines = append(*lines, "1. "+empty)
+		return
+	}
+	for index, value := range values {
+		*lines = append(*lines, fmt.Sprintf("%d. %s", index+1, value))
+	}
+}
+
+func appendMarkdownBullets(lines *[]string, values []string, empty string) {
+	if len(values) == 0 {
+		*lines = append(*lines, "- "+empty)
+		return
+	}
+	for _, value := range values {
+		*lines = append(*lines, "- "+markdownText(value))
+	}
 }
 
 func markdownCell(value string) string {

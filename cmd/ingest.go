@@ -18,7 +18,7 @@ var ingestMerge bool
 
 var ingestCmd = &cobra.Command{
 	Use:   "ingest",
-	Short: "Ingest evidence from external tool output",
+	Short: "Convert test, security, and telemetry reports into Bottleneck evidence",
 }
 
 func init() {

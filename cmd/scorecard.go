@@ -20,10 +20,19 @@ var scorecardFormat string
 var scorecardView string
 var scorecardStrict bool
 var scorecardGitHubAnnotations bool
+var scorecardDetails bool
 
 var scorecardCmd = &cobra.Command{
 	Use:   "scorecard",
-	Short: "Summarize the current SDLC scorecard state",
+	Short: "Show release readiness, primary bottleneck, and next action",
+	Long: `Show the main Bottleneck release-readiness surface.
+
+Start here for a SaaS day-one flow:
+  bottleneck init --template saas
+  bottleneck scorecard
+  bottleneck diagnose
+
+By default, text output is concise. Use --details for evidence, thresholds, and score impacts.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine := validator.NewEngine(".", scorecardEnv, validator.WithStrictMode(scorecardStrict))
 		result := engine.Validate()
@@ -36,8 +45,9 @@ var scorecardCmd = &cobra.Command{
 		}
 
 		output, err := scorecard.RenderWithOptions(result, scorecardFormat, scorecard.Options{
-			View:   scorecardView,
-			GitHub: &githubMetadata,
+			View:    scorecardView,
+			Details: scorecardDetails,
+			GitHub:  &githubMetadata,
 		})
 		if err != nil {
 			return err
@@ -62,6 +72,7 @@ func init() {
 	scorecardCmd.Flags().StringVar(&scorecardEnv, "env", "default", "environment config to use")
 	scorecardCmd.Flags().StringVar(&scorecardFormat, "format", "text", "output format: text, json, or markdown")
 	scorecardCmd.Flags().StringVar(&scorecardView, "view", "engineering", "scorecard view: executive, engineering, or governance")
+	scorecardCmd.Flags().BoolVar(&scorecardDetails, "details", false, "show evidence, thresholds, missing evidence, and score impacts in text output")
 	scorecardCmd.Flags().BoolVar(&scorecardStrict, "strict", false, "treat placeholder and insufficient content as failures")
 	scorecardCmd.Flags().BoolVar(&scorecardGitHubAnnotations, "github-annotations", false, "emit GitHub Actions warning and error annotations")
 	rootCmd.AddCommand(scorecardCmd)

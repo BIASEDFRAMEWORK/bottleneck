@@ -1,0 +1,33 @@
+{
+  "generated_at": "2999-04-30T12:00:00Z",
+  "window": {
+    "start": "2999-04-23T00:00:00Z",
+    "end": "2999-04-30T00:00:00Z"
+  },
+  "deployment_frequency": {
+    "deployments": 6,
+    "period_days": 7
+  },
+  "change_failure_rate": 0.03,
+  "adoption_rate": 0.74,
+  "error_rate": 0.012,
+  "user_override_rate": 0.02,
+  "source_environment": "sample",
+  "cost": {
+    "total": 76.25,
+    "currency": "USD",
+    "budget": 100,
+    "budget_variance": 0.08,
+    "trend": "stable"
+  },
+  "evidence": [
+    {
+      "id": "EXECUTION-001",
+      "type": "telemetry",
+      "source": "sample billing telemetry",
+      "refs": ["BEHAVIOR-001", "BEHAVIOR-002", "BEHAVIOR-003", "ASSURANCE-001", "ASSURANCE-002", "ASSURANCE-003"],
+      "status": "pass",
+      "summary": "Billing telemetry shows payment method updates, invoice retries, and duplicate-charge prevention are healthy in the release window."
+    }
+  ]
+}

@@ -64,26 +64,26 @@ func TestRenderTextIncludesSummaryAndRowData(t *testing.T) {
 	expected := []string{
 		"Bottleneck Scorecard",
 		"Environment: production",
-		"System Status: FAIL",
+		"Release Recommendation: Block",
 		"Primary Bottleneck: Assurance",
-		"Overall Diagnosis:",
-		"Category Gauges:",
-		"Assurance",
-		"<-- primary bottleneck",
+		"Category Results:",
+		"- Assurance: Fail",
 		"Why:",
-		"Next action:",
+		"Next Action:",
 		"Fix failing tests or add passing assurance evidence until accuracy meets the selected threshold.",
-		"Assurance",
-		"Assurance Engineer",
-		"Validation gaps",
-		"accuracy below threshold",
-		"Bottom line:",
-		"The system is not valid for production. Primary ownership starts with Assurance Engineer.",
 	}
 
 	for _, substring := range expected {
 		if !strings.Contains(output, substring) {
 			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+	for _, verboseSection := range []string{"Effective Thresholds:", "Capability Details:", "Score Impacts:"} {
+		if verboseSection == "Effective Thresholds:" {
+			continue
+		}
+		if strings.Contains(output, verboseSection) {
+			t.Fatalf("default scorecard output should omit %q:\n%s", verboseSection, output)
 		}
 	}
 }
@@ -116,17 +116,77 @@ func TestRenderTextIncludesCategoryGaugeAndWeakestMarker(t *testing.T) {
 	}
 
 	expected := []string{
-		"Category Gauges:",
-		"Behavior",
-		"[#####-----]  50",
-		"<-- primary bottleneck",
+		"Category Results:",
+		"- Behavior: Warn",
 		"Primary Bottleneck: Behavior",
 		"Why:",
-		"Next action:",
+		"Next Action:",
 	}
 	for _, substring := range expected {
 		if !strings.Contains(output, substring) {
 			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+	for _, verboseMarker := range []string{"Category Gauges:", "<-- primary bottleneck", "Capability Details:"} {
+		if strings.Contains(output, verboseMarker) {
+			t.Fatalf("default scorecard output should not include detailed marker %q:\n%s", verboseMarker, output)
+		}
+	}
+}
+
+func TestRenderDefaultSaaSScorecardIsConciseMainSurface(t *testing.T) {
+	output, err := Render(sampleSaaSDayOneResult(), "text")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expected := []string{
+		"Bottleneck Scorecard",
+		"Environment: dev",
+		"Release Recommendation: Conditional",
+		"Primary Bottleneck: Assurance",
+		"Effective Thresholds:",
+		"- Minimum score: 65",
+		"- Required traceability: false",
+		"- Critical security findings allowed: 1",
+		"- Stale telemetry allowed: true",
+		"Category Results:",
+		"- Intent: Pass",
+		"- Behavior: Pass",
+		"- Design: Pass",
+		"- Assurance: Warn",
+		"- Security: Pass",
+		"- Execution: Pass",
+		"Why:",
+		"BEHAVIOR-003 payment retry behavior has no mapped test evidence.",
+		"Next Action:",
+		"Add assurance evidence for payment retry behavior. Map it to BEHAVIOR-003.",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in concise SaaS scorecard:\n%s", substring, output)
+		}
+	}
+
+	assertInOrder(t, output, []string{
+		"- Intent: Pass",
+		"- Behavior: Pass",
+		"- Design: Pass",
+		"- Assurance: Warn",
+		"- Security: Pass",
+		"- Execution: Pass",
+	})
+
+	lineCount := len(strings.Split(strings.TrimSpace(output), "\n"))
+	if lineCount > 30 {
+		t.Fatalf("expected concise scorecard to stay scan-friendly, got %d lines:\n%s", lineCount, output)
+	}
+	for _, verboseSection := range []string{"Effective Thresholds:", "Capability Details:", "Evidence:", "Score Impacts:"} {
+		if verboseSection == "Effective Thresholds:" {
+			continue
+		}
+		if strings.Contains(output, verboseSection) {
+			t.Fatalf("concise scorecard should omit %q:\n%s", verboseSection, output)
 		}
 	}
 }
@@ -183,6 +243,12 @@ func TestRenderJSONProducesValidJSON(t *testing.T) {
 	if decoded.EffectiveThresholds.Execution.Telemetry.MaxAgeHours != 168 {
 		t.Fatalf("expected telemetry freshness threshold in json, got %d", decoded.EffectiveThresholds.Execution.Telemetry.MaxAgeHours)
 	}
+	if decoded.EffectiveThresholds.Gate.Release.MinPrimaryScore != 85 {
+		t.Fatalf("expected release gate minimum score in json, got %d", decoded.EffectiveThresholds.Gate.Release.MinPrimaryScore)
+	}
+	if !decoded.EffectiveThresholds.Gate.Release.RequireTraceability {
+		t.Fatal("expected release gate traceability threshold in json")
+	}
 	if len(decoded.Capabilities) != 1 {
 		t.Fatalf("expected capability array, got %d", len(decoded.Capabilities))
 	}
@@ -214,7 +280,7 @@ func TestRenderSurfacesContentQualityDetailsInTextAndJSON(t *testing.T) {
 		}},
 	}
 
-	textOutput, err := Render(result, "text")
+	textOutput, err := RenderWithOptions(result, "text", Options{Details: true})
 	if err != nil {
 		t.Fatalf("Render text returned error: %v", err)
 	}
@@ -419,7 +485,7 @@ func TestCapabilityEntriesIncludeEvidenceDepthFields(t *testing.T) {
 }
 
 func TestRenderTextIncludesThresholdsAndReleaseRecommendation(t *testing.T) {
-	output, err := Render(sampleWarningResult(), "text")
+	output, err := RenderWithOptions(sampleWarningResult(), "text", Options{Details: true})
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -427,6 +493,11 @@ func TestRenderTextIncludesThresholdsAndReleaseRecommendation(t *testing.T) {
 	expected := []string{
 		"Release Recommendation: Conditional",
 		"Effective Thresholds:",
+		"Minimum score: 85",
+		"Required traceability: true",
+		"Critical security findings allowed: 0",
+		"Stale telemetry allowed: false",
+		"gate.release.min_primary_score: 85",
 		"assurance.min_accuracy: 0.95",
 		"assurance.max_failures: 0",
 		"execution.max_error_rate: 0.05",
@@ -453,6 +524,9 @@ func TestRenderMarkdownProducesGitHubReadableTable(t *testing.T) {
 	expected := []string{
 		"# bottleneck Scorecard",
 		"| Field | Value |",
+		"## Effective Thresholds",
+		"| Minimum score | 85 |",
+		"| Required traceability | true |",
 		"## Diagnosis",
 		"| Capability | Status | Score | Evidence | Missing Evidence | Recommendation |",
 		"| Behavior | WARN | 50 | 1 |",
@@ -585,7 +659,7 @@ func TestEngineeringViewIncludesDetailedEvidenceAndMissingEvidence(t *testing.T)
 	result := sampleWarningResult()
 	result.Results[0].Details = []string{detail}
 
-	output, err := Render(result, "text", ViewEngineering)
+	output, err := RenderWithOptions(result, "text", Options{View: ViewEngineering, Details: true})
 	if err != nil {
 		t.Fatalf("Render returned error: %v", err)
 	}
@@ -674,6 +748,47 @@ func sampleWarningResult() models.EngineResult {
 	}
 }
 
+func sampleSaaSDayOneResult() models.EngineResult {
+	return models.EngineResult{
+		Environment:         "dev",
+		SystemStatus:        models.StatusWarning,
+		PrimaryBottleneck:   "Traceability",
+		EffectiveThresholds: sampleDevThresholds(),
+		Results: []models.ValidationResult{
+			{Capability: "Behavior", Status: models.StatusPass, Details: []string{"behavior evidence"}},
+			{Capability: "Intent", Status: models.StatusPass, Details: []string{"intent evidence"}},
+			{Capability: "Design", Status: models.StatusPass, Details: []string{"design evidence"}},
+			{Capability: "Assurance", Status: models.StatusPass},
+			{Capability: "Security", Status: models.StatusPass, Details: []string{"violations: 0"}},
+			{Capability: "Execution", Status: models.StatusPass, Details: []string{"error_rate: 0.01", "adoption_rate: 0.68"}},
+			{
+				Capability: "Traceability",
+				Status:     models.StatusWarning,
+				Message:    "traceability warnings detected",
+				Details:    []string{"bottleneck/behavior/behavior-spec.md BEHAVIOR-003 has no mapped test evidence"},
+				EvidenceQuality: models.EvidenceQuality{
+					Score: 75,
+					ScoreImpacts: []models.ScoreImpact{{
+						Reason: "bottleneck/behavior/behavior-spec.md BEHAVIOR-003 has no mapped test evidence",
+						Delta:  -25,
+					}},
+				},
+			},
+		},
+	}
+}
+
+func sampleDevThresholds() models.EffectiveThresholds {
+	thresholds := sampleThresholds()
+	thresholds.Execution.Telemetry.MaxAgeHours = 0
+	thresholds.Execution.Telemetry.StaleAllowed = true
+	thresholds.Security.SARIF.MaxCritical = 1
+	thresholds.Gate.Release.MinPrimaryScore = 65
+	thresholds.Gate.Release.RequireTraceability = false
+	thresholds.Gate.Release.RequireGovernance = false
+	return thresholds
+}
+
 func sampleThresholds() models.EffectiveThresholds {
 	return models.EffectiveThresholds{
 		Assurance: models.AssuranceThresholds{
@@ -685,6 +800,7 @@ func sampleThresholds() models.EffectiveThresholds {
 			MinAdoption:  0.50,
 			Telemetry: models.TelemetryThresholds{
 				MaxAgeHours:           168,
+				StaleAllowed:          false,
 				MinDeploymentsPerWeek: 1,
 				MaxChangeFailureRate:  0.15,
 				MaxErrorRate:          0.05,
@@ -700,6 +816,14 @@ func sampleThresholds() models.EffectiveThresholds {
 				MaxMedium:             5,
 				MaxLow:                20,
 				FailOnUnknownSeverity: false,
+			},
+		},
+		Gate: models.GateThresholds{
+			Release: models.ReleaseGateThresholds{
+				MinPrimaryScore:     85,
+				RequiredCategories:  []string{"Intent", "Behavior", "Assurance", "Security", "Execution"},
+				RequireTraceability: true,
+				RequireGovernance:   true,
 			},
 		},
 	}
@@ -730,4 +854,19 @@ func diagnosisScoreFor(card Scorecard, category string) int {
 		}
 	}
 	return 0
+}
+
+func assertInOrder(t *testing.T, output string, expected []string) {
+	t.Helper()
+	lastIndex := -1
+	for _, substring := range expected {
+		index := strings.Index(output, substring)
+		if index == -1 {
+			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+		if index <= lastIndex {
+			t.Fatalf("expected %q after prior category in output:\n%s", substring, output)
+		}
+		lastIndex = index
+	}
 }

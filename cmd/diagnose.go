@@ -22,7 +22,7 @@ var diagnoseGate string
 
 var diagnoseCmd = &cobra.Command{
 	Use:   "diagnose",
-	Short: "Diagnose the primary bottleneck",
+	Short: "Explain what is blocking delivery and what to inspect next",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine := validator.NewEngine(".", diagnoseEnv, validator.WithStrictMode(diagnoseStrict))
 		result := engine.Validate()
@@ -77,7 +77,11 @@ func renderDiagnoseGate(result models.EngineResult, gateName string, format stri
 
 	settings := config.DefaultReleaseGateConfig()
 	if cfg, err := config.Load(filepath.Join("bottleneck", "config.yaml")); err == nil {
-		settings = config.ResolveEnvironment(cfg, env).Gate.Release
+		envConfig, err := config.ResolveEnvironmentStrict(cfg, env)
+		if err != nil {
+			return "", 1, err
+		}
+		settings = envConfig.Gate.Release
 	}
 
 	report := gate.EvaluateRelease(result, settings)

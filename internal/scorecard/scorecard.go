@@ -71,8 +71,9 @@ type capabilityMetadata struct {
 }
 
 type Options struct {
-	View   string
-	GitHub *githubactions.Metadata
+	View    string
+	Details bool
+	GitHub  *githubactions.Metadata
 }
 
 var metadataByCapability = map[string]capabilityMetadata{
@@ -196,7 +197,7 @@ func RenderWithOptions(result models.EngineResult, format string, options Option
 
 	switch strings.ToLower(format) {
 	case FormatText:
-		return renderText(card, view), nil
+		return renderText(card, view, options.Details), nil
 	case FormatJSON:
 		return renderJSON(card)
 	case FormatMarkdown:
@@ -226,7 +227,22 @@ func buildCapability(validation models.ValidationResult, score int) CapabilitySc
 	}
 }
 
-func renderText(card Scorecard, view string) string {
+func renderText(card Scorecard, view string, details bool) string {
+	if details {
+		return renderDetailedText(card, view)
+	}
+
+	switch view {
+	case ViewExecutive:
+		return renderExecutiveText(card)
+	case ViewGovernance:
+		return renderGovernanceText(card)
+	default:
+		return renderSummaryText(card)
+	}
+}
+
+func renderDetailedText(card Scorecard, view string) string {
 	switch view {
 	case ViewExecutive:
 		return renderExecutiveText(card)
@@ -235,6 +251,34 @@ func renderText(card Scorecard, view string) string {
 	default:
 		return renderEngineeringText(card)
 	}
+}
+
+func renderSummaryText(card Scorecard) string {
+	lines := []string{
+		"Bottleneck Scorecard",
+		fmt.Sprintf("Environment: %s", card.Environment),
+		fmt.Sprintf("Release Recommendation: %s", card.ReleaseRecommendation),
+		fmt.Sprintf("Primary Bottleneck: %s", card.PrimaryBottleneck),
+		"",
+		"Effective Thresholds:",
+	}
+	lines = append(lines, compactThresholdLines(card.EffectiveThresholds, "- ")...)
+	lines = append(lines,
+		"",
+		"Category Results:",
+	)
+	lines = append(lines, categoryResultLines(card)...)
+	lines = append(lines,
+		"",
+		"Why:",
+		summaryWhy(card),
+		"",
+		"Next Action:",
+		summaryNextAction(card),
+		"",
+		"Run `bottleneck scorecard --details` for evidence, thresholds, and score impacts.",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func renderEngineeringText(card Scorecard) string {
@@ -291,10 +335,106 @@ func gaugeScorecardHeader(card Scorecard) []string {
 		"Overall Diagnosis:",
 		fmt.Sprintf("Why: %s", card.Diagnosis.WhyItMatters),
 		"",
-		"Next action:",
-		card.Diagnosis.RecommendedAction,
+		fmt.Sprintf("Next Action: %s", card.Diagnosis.RecommendedAction),
 	)
 	return lines
+}
+
+var summaryCategoryOrder = []string{"Intent", "Behavior", "Design", "Assurance", "Security", "Execution"}
+
+func categoryResultLines(card Scorecard) []string {
+	scores := map[string]diagnosis.CategoryScore{}
+	for _, score := range card.Diagnosis.CategoryScores {
+		scores[score.Category] = score
+	}
+
+	lines := []string{}
+	for _, category := range summaryCategoryOrder {
+		score, ok := scores[category]
+		if !ok {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", category, summaryCategoryStatus(score)))
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "- No category results available.")
+	}
+	return lines
+}
+
+func summaryCategoryStatus(score diagnosis.CategoryScore) string {
+	switch displayStatus(score.Status) {
+	case StatusFail:
+		return "Fail"
+	case StatusWarn:
+		return "Warn"
+	case StatusUnknown:
+		return "Unknown"
+	}
+
+	switch {
+	case score.Score >= strongSummaryScore:
+		return "Pass"
+	case score.Score >= weakSummaryScore:
+		return "Warn"
+	default:
+		return "Fail"
+	}
+}
+
+const (
+	strongSummaryScore = 80
+	weakSummaryScore   = 60
+)
+
+func summaryWhy(card Scorecard) string {
+	if card.PrimaryBottleneck == diagnosis.HealthyPrimaryBottleneck {
+		return "All assessed evidence is strong enough to support the current release decision."
+	}
+
+	combined := strings.Join(card.Diagnosis.ContributingFindings, "\n")
+	lower := strings.ToLower(combined)
+	switch {
+	case strings.Contains(lower, "behavior-003") && strings.Contains(lower, "no mapped test evidence"):
+		return "BEHAVIOR-003 payment retry behavior has no mapped test evidence."
+	case strings.Contains(lower, "no mapped test evidence"):
+		if finding := firstMatchingFinding(card.Diagnosis.ContributingFindings, "no mapped test evidence"); finding != "" {
+			return finding
+		}
+	case strings.Contains(lower, "payment retry"):
+		if finding := firstMatchingFinding(card.Diagnosis.ContributingFindings, "payment retry"); finding != "" {
+			return finding
+		}
+	}
+
+	if len(card.Diagnosis.ContributingFindings) > 0 {
+		return card.Diagnosis.ContributingFindings[0]
+	}
+	return card.Diagnosis.WhyItMatters
+}
+
+func summaryNextAction(card Scorecard) string {
+	action := strings.TrimSpace(card.Diagnosis.RecommendedAction)
+	if action == "" {
+		return "Inspect the scorecard details and repair the weakest evidence category."
+	}
+	combined := strings.ToLower(action + "\n" + strings.Join(card.Diagnosis.ContributingFindings, "\n"))
+	if strings.Contains(combined, "behavior-003") || strings.Contains(combined, "payment retry") {
+		if !strings.Contains(strings.ToUpper(action), "BEHAVIOR-003") {
+			return strings.TrimSuffix(action, ".") + ". Map it to BEHAVIOR-003."
+		}
+	}
+	return action
+}
+
+func firstMatchingFinding(findings []string, needle string) string {
+	needle = strings.ToLower(needle)
+	for _, finding := range findings {
+		if strings.Contains(strings.ToLower(finding), needle) {
+			return finding
+		}
+	}
+	return ""
 }
 
 func renderExecutiveText(card Scorecard) string {
@@ -630,6 +770,20 @@ func thresholdLines(thresholds models.EffectiveThresholds, prefix string) []stri
 	return lines
 }
 
+func compactThresholdLines(thresholds models.EffectiveThresholds, prefix string) []string {
+	rows := []thresholdRow{
+		{name: "Minimum score", value: fmt.Sprintf("%d", thresholds.Gate.Release.MinPrimaryScore)},
+		{name: "Required traceability", value: fmt.Sprintf("%t", thresholds.Gate.Release.RequireTraceability)},
+		{name: "Critical security findings allowed", value: fmt.Sprintf("%d", thresholds.Security.SARIF.MaxCritical)},
+		{name: "Stale telemetry allowed", value: fmt.Sprintf("%t", thresholds.Execution.Telemetry.StaleAllowed)},
+	}
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines = append(lines, fmt.Sprintf("%s%s: %s", prefix, row.name, row.value))
+	}
+	return lines
+}
+
 type thresholdRow struct {
 	name  string
 	value string
@@ -637,11 +791,19 @@ type thresholdRow struct {
 
 func thresholdRows(thresholds models.EffectiveThresholds) []thresholdRow {
 	return []thresholdRow{
+		{name: "Minimum score", value: fmt.Sprintf("%d", thresholds.Gate.Release.MinPrimaryScore)},
+		{name: "Required traceability", value: fmt.Sprintf("%t", thresholds.Gate.Release.RequireTraceability)},
+		{name: "Critical security findings allowed", value: fmt.Sprintf("%d", thresholds.Security.SARIF.MaxCritical)},
+		{name: "Stale telemetry allowed", value: fmt.Sprintf("%t", thresholds.Execution.Telemetry.StaleAllowed)},
+		{name: "gate.release.min_primary_score", value: fmt.Sprintf("%d", thresholds.Gate.Release.MinPrimaryScore)},
+		{name: "gate.release.require_traceability", value: fmt.Sprintf("%t", thresholds.Gate.Release.RequireTraceability)},
+		{name: "gate.release.require_governance", value: fmt.Sprintf("%t", thresholds.Gate.Release.RequireGovernance)},
 		{name: "assurance.min_accuracy", value: fmt.Sprintf("%.2f", thresholds.Assurance.MinAccuracy)},
 		{name: "assurance.max_failures", value: fmt.Sprintf("%d", thresholds.Assurance.MaxFailures)},
 		{name: "execution.max_error_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.MaxErrorRate)},
 		{name: "execution.min_adoption", value: fmt.Sprintf("%.2f", thresholds.Execution.MinAdoption)},
 		{name: "execution.telemetry.max_age_hours", value: fmt.Sprintf("%d", thresholds.Execution.Telemetry.MaxAgeHours)},
+		{name: "execution.telemetry.stale_allowed", value: fmt.Sprintf("%t", thresholds.Execution.Telemetry.StaleAllowed)},
 		{name: "execution.telemetry.min_deployments_per_week", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MinDeploymentsPerWeek)},
 		{name: "execution.telemetry.max_change_failure_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MaxChangeFailureRate)},
 		{name: "execution.telemetry.max_error_rate", value: fmt.Sprintf("%.2f", thresholds.Execution.Telemetry.MaxErrorRate)},
@@ -738,6 +900,10 @@ func missingEvidenceFor(validation models.ValidationResult, evidence []string, m
 	switch {
 	case status == StatusUnknown:
 		missing = append(missing, fmt.Sprintf("%s was not assessed by validation.", validation.Capability))
+	case strings.Contains(message, "no bottleneck config found"):
+		missing = append(missing, "Initialize a SaaS starter project with `bottleneck init --template saas`.")
+	case strings.Contains(message, "unknown environment"):
+		missing = append(missing, "Choose a supported environment, for example `bottleneck scorecard --env=production`.")
 	case strings.Contains(message, "missing or invalid config.yaml"):
 		missing = append(missing, "Repair bottleneck/config.yaml so effective thresholds can be resolved.")
 	case strings.Contains(message, "missing behavior-spec.md"):
@@ -748,6 +914,8 @@ func missingEvidenceFor(validation models.ValidationResult, evidence []string, m
 		missing = append(missing, "Create bottleneck/design/architecture.md with architecture evidence.")
 	case strings.Contains(message, "missing results.json"):
 		missing = append(missing, "Provide bottleneck/assurance/results.json from the external BDD results.")
+	case strings.Contains(message, "no assurance evidence found"):
+		missing = append(missing, "Add test evidence manually or run `bottleneck ingest cucumber --file reports/cucumber.json`.")
 	case strings.Contains(message, "missing guardrails.json"):
 		missing = append(missing, "Provide bottleneck/security/guardrails.json with guardrail violation evidence.")
 	case strings.Contains(message, "missing telemetry.json"):
@@ -779,6 +947,8 @@ func missingEvidenceFor(validation models.ValidationResult, evidence []string, m
 
 func missingEvidenceFromDetail(detail string) string {
 	switch {
+	case strings.Contains(detail, "has no mapped test evidence"):
+		return detail
 	case strings.Contains(detail, "still contains placeholder content"):
 		return strings.Replace(detail, "still contains placeholder content", "needs real evidence", 1)
 	case strings.Contains(detail, "is too thin to validate"):

@@ -114,6 +114,7 @@ func contentQualityResult(capability string, details []string, strict bool) mode
 
 func contentQualityResultWithQuality(capability string, quality models.EvidenceQuality, strict bool) models.ValidationResult {
 	result := contentQualityResult(capability, quality.Details, strict)
+	result.Details = placeholderGuidanceDetails(result.Details)
 	result.Findings = findingsForQuality(result.Status, quality)
 	result.EvidenceQuality = quality
 	return result

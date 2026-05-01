@@ -3,6 +3,7 @@ package ingest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -161,6 +162,200 @@ func TestNormalizeSARIFNoFindingsAndCodeQLSeverity(t *testing.T) {
 	codeqlArtifact := codeql.Artifact.(SecurityArtifact)
 	if codeqlArtifact.Findings["high"] != 1 {
 		t.Fatalf("expected CodeQL security-severity high, got %#v", codeqlArtifact.Findings)
+	}
+}
+
+func TestNormalizeSARIFPreservesBottleneckRefsFromProperties(t *testing.T) {
+	tempDir := t.TempDir()
+	result, err := IngestSARIF(tempDir, sampleReportPath("codeql.sarif"), "", false, true)
+	if err != nil {
+		t.Fatalf("ingest sample sarif: %v", err)
+	}
+	artifact := result.Artifact.(SecurityArtifact)
+	if len(artifact.Evidence) != 1 {
+		t.Fatalf("expected one sample SARIF evidence item, got %d", len(artifact.Evidence))
+	}
+	refs := artifact.Evidence[0].Refs
+	if !containsString(refs, "BEHAVIOR-003") || !containsString(refs, "INTENT-001") {
+		t.Fatalf("expected SARIF refs to preserve BEHAVIOR-003 and INTENT-001, got %#v", refs)
+	}
+}
+
+func TestSaaSReportSamplesParseAndWriteNormalizedEvidence(t *testing.T) {
+	t.Run("cucumber", func(t *testing.T) {
+		rootPath := t.TempDir()
+		result, err := IngestCucumber(rootPath, sampleReportPath("cucumber.json"), "", false, false)
+		if err != nil {
+			t.Fatalf("ingest sample cucumber: %v", err)
+		}
+		artifact := result.Artifact.(AssuranceArtifact)
+		if artifact.ScenariosTotal != 3 || artifact.ScenariosPassed != 3 || artifact.ScenariosFailed != 0 {
+			t.Fatalf("unexpected sample cucumber counts: %#v", artifact)
+		}
+		if len(artifact.Evidence) != 3 || artifact.Evidence[2].ID != "ASSURANCE-003" || !containsString(artifact.Evidence[2].Refs, "BEHAVIOR-003") {
+			t.Fatalf("expected generated ASSURANCE-003 linked to BEHAVIOR-003, got %#v", artifact.Evidence)
+		}
+		assertWrittenArtifactContains(t, rootPath, DefaultAssuranceOutput, "ASSURANCE-003", "BEHAVIOR-003")
+	})
+
+	t.Run("sarif", func(t *testing.T) {
+		rootPath := t.TempDir()
+		result, err := IngestSARIF(rootPath, sampleReportPath("codeql.sarif"), "", false, false)
+		if err != nil {
+			t.Fatalf("ingest sample sarif: %v", err)
+		}
+		artifact := result.Artifact.(SecurityArtifact)
+		if artifact.Findings["low"] != 1 || artifact.Violations != 1 {
+			t.Fatalf("expected one low SARIF finding, got %#v", artifact)
+		}
+		if len(artifact.Evidence) != 1 || artifact.Evidence[0].ID != "SECURITY-001" || !containsString(artifact.Evidence[0].Refs, "BEHAVIOR-003") {
+			t.Fatalf("expected generated SECURITY-001 linked to BEHAVIOR-003, got %#v", artifact.Evidence)
+		}
+		assertWrittenArtifactContains(t, rootPath, DefaultSecurityOutput, "SECURITY-001", "BEHAVIOR-003")
+	})
+
+	t.Run("test summary", func(t *testing.T) {
+		rootPath := t.TempDir()
+		result, err := IngestTestSummary(rootPath, sampleReportPath("test-summary.json"), "", false, false)
+		if err != nil {
+			t.Fatalf("ingest sample test summary: %v", err)
+		}
+		artifact := result.Artifact.(AssuranceArtifact)
+		if artifact.ScenariosTotal != 12 || artifact.ScenariosPassed != 12 || artifact.ScenariosFailed != 0 {
+			t.Fatalf("unexpected sample test summary counts: %#v", artifact)
+		}
+		if len(artifact.Evidence) != 3 || artifact.Evidence[2].ID != "ASSURANCE-003" || !containsString(artifact.Evidence[2].Refs, "BEHAVIOR-003") {
+			t.Fatalf("expected preserved ASSURANCE-003 linked to BEHAVIOR-003, got %#v", artifact.Evidence)
+		}
+		assertWrittenArtifactContains(t, rootPath, DefaultAssuranceOutput, "ASSURANCE-003", "BEHAVIOR-003")
+	})
+
+	t.Run("telemetry", func(t *testing.T) {
+		rootPath := t.TempDir()
+		result, err := IngestTelemetry(rootPath, sampleReportPath("telemetry.json"), "", false, false)
+		if err != nil {
+			t.Fatalf("ingest sample telemetry: %v", err)
+		}
+		artifact := result.Artifact.(ExecutionArtifact)
+		if artifact.DeploymentFrequency == nil || artifact.DeploymentFrequency.Deployments != 6 {
+			t.Fatalf("expected sample deployment frequency, got %#v", artifact.DeploymentFrequency)
+		}
+		if len(artifact.Evidence) != 1 || artifact.Evidence[0].ID != "EXECUTION-001" || !containsString(artifact.Evidence[0].Refs, "BEHAVIOR-003") {
+			t.Fatalf("expected preserved EXECUTION-001 linked to BEHAVIOR-003, got %#v", artifact.Evidence)
+		}
+		assertWrittenArtifactContains(t, rootPath, DefaultExecutionOutput, "EXECUTION-001", "BEHAVIOR-003")
+	})
+}
+
+func TestSaaSReportSampleDryRunsDoNotWriteNormalizedEvidence(t *testing.T) {
+	cases := []struct {
+		name string
+		file string
+		out  string
+		run  func(rootPath, filePath string) (IngestSummary, error)
+	}{
+		{
+			name: "cucumber",
+			file: "cucumber.json",
+			out:  DefaultAssuranceOutput,
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestCucumber(rootPath, filePath, "", false, true)
+			},
+		},
+		{
+			name: "sarif",
+			file: "codeql.sarif",
+			out:  DefaultSecurityOutput,
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestSARIF(rootPath, filePath, "", false, true)
+			},
+		},
+		{
+			name: "test-summary",
+			file: "test-summary.json",
+			out:  DefaultAssuranceOutput,
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestTestSummary(rootPath, filePath, "", false, true)
+			},
+		},
+		{
+			name: "telemetry",
+			file: "telemetry.json",
+			out:  DefaultExecutionOutput,
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestTelemetry(rootPath, filePath, "", false, true)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rootPath := t.TempDir()
+			if _, err := tc.run(rootPath, sampleReportPath(tc.file)); err != nil {
+				t.Fatalf("dry-run sample %s: %v", tc.name, err)
+			}
+			if _, err := os.Stat(filepath.Join(rootPath, tc.out)); !os.IsNotExist(err) {
+				t.Fatalf("dry-run %s should not write %s, stat err=%v", tc.name, tc.out, err)
+			}
+		})
+	}
+}
+
+func TestSaaSReportInvalidInputsFailCleanly(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(rootPath, filePath string) (IngestSummary, error)
+	}{
+		{
+			name: "cucumber",
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestCucumber(rootPath, filePath, "", false, true)
+			},
+		},
+		{
+			name: "sarif",
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestSARIF(rootPath, filePath, "", false, true)
+			},
+		},
+		{
+			name: "test-summary",
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestTestSummary(rootPath, filePath, "", false, true)
+			},
+		},
+		{
+			name: "telemetry",
+			run: func(rootPath, filePath string) (IngestSummary, error) {
+				return IngestTelemetry(rootPath, filePath, "", false, true)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rootPath := t.TempDir()
+			invalidPath := filepath.Join(rootPath, tc.name+".json")
+			if err := os.WriteFile(invalidPath, []byte("not valid json"), 0o644); err != nil {
+				t.Fatalf("write invalid %s input: %v", tc.name, err)
+			}
+			_, err := tc.run(rootPath, invalidPath)
+			if err == nil {
+				t.Fatalf("expected invalid %s input to return an error", tc.name)
+			}
+			if !strings.Contains(err.Error(), "parse") {
+				t.Fatalf("expected invalid %s error to mention parse, got %v", tc.name, err)
+			}
+			for _, substring := range []string{
+				invalidPath,
+				"Next action: check the expected sample format",
+				"examples/saas/reports/",
+			} {
+				if !strings.Contains(err.Error(), substring) {
+					t.Fatalf("expected invalid %s error to contain %q, got %v", tc.name, substring, err)
+				}
+			}
+		})
 	}
 }
 
@@ -366,6 +561,24 @@ func TestIngestCodeQLInvalidInputReturnsError(t *testing.T) {
 
 func fixturePath(name string) string {
 	return filepath.Join("testdata", name)
+}
+
+func sampleReportPath(name string) string {
+	return filepath.Join("..", "..", "examples", "saas", "reports", name)
+}
+
+func assertWrittenArtifactContains(t *testing.T, rootPath string, relativePath string, expected ...string) {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(rootPath, relativePath))
+	if err != nil {
+		t.Fatalf("read written artifact %s: %v", relativePath, err)
+	}
+	text := string(content)
+	for _, substring := range expected {
+		if !strings.Contains(text, substring) {
+			t.Fatalf("expected written artifact %s to contain %q\n%s", relativePath, substring, text)
+		}
+	}
 }
 
 func writeBehaviorSpec(t *testing.T, rootPath string, behaviorID string) {

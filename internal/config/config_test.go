@@ -197,6 +197,129 @@ func TestResolveEnvironmentLegacyExecutionOverrideFeedsTelemetry(t *testing.T) {
 	}
 }
 
+func TestResolveEnvironmentStrictRejectsUnknownEnvironment(t *testing.T) {
+	cfg := Config{Environments: map[string]EnvironmentConfig{
+		"default": {},
+		"dev":     {},
+		"stage":   {},
+	}}
+
+	_, err := ResolveEnvironmentStrict(cfg, "not-real")
+	if err == nil {
+		t.Fatal("expected unknown environment error")
+	}
+	expected := `unknown environment "not-real" (supported: default, dev, stage)`
+	if err.Error() != expected {
+		t.Fatalf("expected %q, got %q", expected, err.Error())
+	}
+}
+
+func TestResolveEnvironmentStrictAllowsDefaultWhenOnlyDefaultsExist(t *testing.T) {
+	cfg := Config{Environments: map[string]EnvironmentConfig{
+		"default": {
+			Assurance: AssuranceConfig{MinAccuracy: 0.90, MaxFailures: 0},
+		},
+	}}
+
+	resolved, err := ResolveEnvironmentStrict(cfg, "default")
+	if err != nil {
+		t.Fatalf("expected default environment to resolve: %v", err)
+	}
+	if resolved.Assurance.MinAccuracy != 0.90 {
+		t.Fatalf("expected default assurance threshold, got %.2f", resolved.Assurance.MinAccuracy)
+	}
+}
+
+func TestResolveEnvironmentStrictInheritanceForDayOneDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 5
+    gate:
+      release:
+        min_primary_score: 70
+        require_traceability: false
+  dev:
+    gate:
+      release:
+        min_primary_score: 65
+  stage:
+    assurance:
+      min_accuracy: 0.95
+    gate:
+      release:
+        min_primary_score: 80
+        require_traceability: true
+  production:
+    execution:
+      telemetry:
+        max_age_hours: 48
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 0
+    gate:
+      release:
+        min_primary_score: 85
+        require_traceability: true
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	dev, err := ResolveEnvironmentStrict(cfg, "dev")
+	if err != nil {
+		t.Fatalf("resolve dev: %v", err)
+	}
+	if dev.Gate.Release.MinPrimaryScore != 65 {
+		t.Fatalf("expected dev min score override 65, got %d", dev.Gate.Release.MinPrimaryScore)
+	}
+	if dev.Gate.Release.RequireTraceability {
+		t.Fatal("expected dev to inherit default optional traceability")
+	}
+
+	stage, err := ResolveEnvironmentStrict(cfg, "stage")
+	if err != nil {
+		t.Fatalf("resolve stage: %v", err)
+	}
+	if stage.Assurance.MinAccuracy != 0.95 {
+		t.Fatalf("expected stage assurance override, got %.2f", stage.Assurance.MinAccuracy)
+	}
+	if stage.Security.SARIF.MaxCritical != 0 {
+		t.Fatalf("expected stage to inherit critical security threshold, got %d", stage.Security.SARIF.MaxCritical)
+	}
+	if !stage.Gate.Release.RequireTraceability {
+		t.Fatal("expected stage traceability requirement override")
+	}
+
+	production, err := ResolveEnvironmentStrict(cfg, "production")
+	if err != nil {
+		t.Fatalf("resolve production: %v", err)
+	}
+	if production.Execution.Telemetry.MaxAgeHours != 48 {
+		t.Fatalf("expected production telemetry freshness override, got %d", production.Execution.Telemetry.MaxAgeHours)
+	}
+	if production.Security.SARIF.MaxMedium != 0 {
+		t.Fatalf("expected production security override, got %d", production.Security.SARIF.MaxMedium)
+	}
+	if !production.Gate.Release.RequireTraceability || production.Gate.Release.MinPrimaryScore != 85 {
+		t.Fatalf("expected production release gate overrides, got %#v", production.Gate.Release)
+	}
+}
+
 func sameStrings(left []string, right []string) bool {
 	if len(left) != len(right) {
 		return false

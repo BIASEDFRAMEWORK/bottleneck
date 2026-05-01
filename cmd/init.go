@@ -8,6 +8,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	initTemplateDefault = "default"
+	initTemplateSaaS    = "saas"
+)
+
+var initTemplate string
+
 var initDirectories = []string{
 	"bottleneck",
 	"bottleneck/behavior",
@@ -32,6 +39,23 @@ var initFiles = map[string]string{
 	"bottleneck/docs/validation.md":                validationDocumentation,
 }
 
+var saasInitFiles = map[string]string{
+	"bottleneck/config.yaml":                       saasConfigYAML,
+	"bottleneck/behavior/behavior-spec.md":         saasBehaviorSpec,
+	"bottleneck/intent/intent.md":                  saasIntent,
+	"bottleneck/design/architecture.md":            saasArchitecture,
+	"bottleneck/assurance/features/sample.feature": saasAssuranceFeature,
+	"bottleneck/assurance/results.json":            saasAssuranceResults,
+	"bottleneck/security/guardrails.json":          saasSecurityGuardrails,
+	"bottleneck/execution/telemetry.json":          saasExecutionTelemetry,
+	"bottleneck/docs/validation.md":                saasValidationDocumentation,
+}
+
+type initTemplateDefinition struct {
+	files   map[string]string
+	message string
+}
+
 const defaultConfigYAML = `environments:
   default:
     assurance:
@@ -42,7 +66,7 @@ const defaultConfigYAML = `environments:
       max_error_rate: 0.05
       min_adoption: 0.5
       telemetry:
-        max_age_hours: 168
+        max_age_hours: 0
         min_deployments_per_week: 1
         max_change_failure_rate: 0.15
         max_error_rate: 0.05
@@ -60,34 +84,112 @@ const defaultConfigYAML = `environments:
 
     gate:
       release:
-        min_primary_score: 60
+        min_primary_score: 70
         required_categories:
           - Intent
           - Behavior
           - Assurance
           - Security
           - Execution
-        require_traceability: true
+        require_traceability: false
         require_governance: false
+
+  local:
+    assurance:
+      min_accuracy: 0.75
+      max_failures: 5
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 1
+        max_high: 1
+        max_medium: 10
+        max_low: 30
+    gate:
+      release:
+        min_primary_score: 60
+        require_traceability: false
 
   dev:
     assurance:
       min_accuracy: 0.85
+      max_failures: 2
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 1
+        max_medium: 5
+    gate:
+      release:
+        min_primary_score: 65
+        require_traceability: false
 
   test:
     assurance:
-      min_accuracy: 0.90
-
-  stage:
-    assurance:
-      min_accuracy: 0.93
-
-  production:
-    assurance:
-      min_accuracy: 0.95
+      min_accuracy: 0.92
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 2
+        max_low: 10
     gate:
       release:
         min_primary_score: 75
+        require_traceability: true
+
+  stage:
+    assurance:
+      min_accuracy: 0.95
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 168
+        min_deployments_per_week: 1
+        max_change_failure_rate: 0.12
+        max_error_rate: 0.03
+        min_adoption_rate: 0.60
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 1
+        max_low: 5
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 80
+        require_traceability: true
+
+  production:
+    assurance:
+      min_accuracy: 0.97
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 48
+        min_deployments_per_week: 2
+        max_change_failure_rate: 0.10
+        max_error_rate: 0.02
+        max_user_override_rate: 0.05
+        min_adoption_rate: 0.70
+        max_budget_variance: 0.10
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 0
+        max_low: 0
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 85
         require_traceability: true
         require_governance: true
 `
@@ -251,6 +353,350 @@ const defaultExecutionTelemetry = `{
 }
 `
 
+const saasConfigYAML = `environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+
+    execution:
+      max_error_rate: 0.05
+      min_adoption: 0.5
+      telemetry:
+        max_age_hours: 0
+        min_deployments_per_week: 1
+        max_change_failure_rate: 0.15
+        max_error_rate: 0.05
+        max_user_override_rate: 0.10
+        min_adoption_rate: 0.50
+        max_budget_variance: 0.20
+
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 5
+        max_low: 20
+        fail_on_unknown_severity: false
+
+    gate:
+      release:
+        min_primary_score: 70
+        required_categories:
+          - Intent
+          - Behavior
+          - Assurance
+          - Security
+          - Execution
+        require_traceability: false
+        require_governance: false
+
+  local:
+    assurance:
+      min_accuracy: 0.75
+      max_failures: 5
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 1
+        max_high: 1
+        max_medium: 10
+        max_low: 30
+    gate:
+      release:
+        min_primary_score: 60
+        require_traceability: false
+
+  dev:
+    assurance:
+      min_accuracy: 0.85
+      max_failures: 2
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 1
+        max_medium: 5
+    gate:
+      release:
+        min_primary_score: 65
+        require_traceability: false
+
+  test:
+    assurance:
+      min_accuracy: 0.92
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 2
+        max_low: 10
+    gate:
+      release:
+        min_primary_score: 75
+        require_traceability: true
+
+  stage:
+    assurance:
+      min_accuracy: 0.95
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 168
+        min_deployments_per_week: 1
+        max_change_failure_rate: 0.12
+        max_error_rate: 0.03
+        min_adoption_rate: 0.60
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 1
+        max_low: 5
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 80
+        require_traceability: true
+
+  production:
+    assurance:
+      min_accuracy: 0.97
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 48
+        min_deployments_per_week: 2
+        max_change_failure_rate: 0.10
+        max_error_rate: 0.02
+        max_user_override_rate: 0.05
+        min_adoption_rate: 0.70
+        max_budget_variance: 0.10
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 0
+        max_low: 0
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 85
+        require_traceability: true
+        require_governance: true
+`
+
+const saasIntent = `# Intent
+
+## Outcomes
+
+### INTENT-001: Subscription Billing Release
+Refs:
+- BEHAVIOR-001
+- BEHAVIOR-002
+- BEHAVIOR-003
+
+Customers must be able to update payment methods without duplicate charges, lost billing state, or exposure of payment details.
+
+## Constraints
+
+- Payment details must stay tokenized through the payment provider and must not be stored directly by the SaaS app.
+- Invoice retry operations must use idempotency keys so repeated requests do not create duplicate charges.
+- Billing state changes must be auditable from customer action through invoice retry outcome.
+
+## Success Criteria
+
+- At least 99% of payment method update attempts complete without customer support intervention.
+- 100% of invoice retry requests reuse the same idempotency key for the same failed invoice.
+- 0 duplicate charges are observed in billing retry telemetry for the release window.
+`
+
+const saasBehaviorSpec = `# Behavior Specification
+
+## Expected Behavior
+
+### BEHAVIOR-001: Customer updates payment method
+Critical: true
+Refs:
+- INTENT-001
+- ASSURANCE-001
+
+When a customer replaces an expired card, the subscription billing service stores only the payment provider token, updates the active subscription payment method, and preserves the existing invoice state.
+
+### BEHAVIOR-002: Failed invoice is retried after payment method update
+Critical: true
+Refs:
+- INTENT-001
+- ASSURANCE-002
+
+When an invoice is past due and the customer updates their payment method, the billing service retries the failed invoice exactly once and records the retry attempt on the invoice timeline.
+
+### BEHAVIOR-003: Duplicate charges are prevented during retry
+Critical: true
+Refs:
+- INTENT-001
+
+When the retry request is submitted more than once for the same invoice, the billing service uses the existing idempotency key and returns the original retry result instead of creating a second charge.
+
+## Unacceptable Behavior
+
+- The system must not store raw card numbers, CVV values, or payment details outside the payment provider token.
+- The system must not create duplicate charges for the same failed invoice retry.
+- The system must not mark an invoice paid unless the payment provider confirms the charge succeeded.
+`
+
+const saasArchitecture = `# Architecture
+
+### DESIGN-001: Tokenized billing retry flow
+Refs:
+- INTENT-001
+- BEHAVIOR-001
+- BEHAVIOR-002
+- BEHAVIOR-003
+
+The subscription billing service receives a payment method update from the account settings page, exchanges card details for a payment provider token, stores the token on the active subscription, and emits a billing event. If an invoice is past due, the invoice retry worker uses an idempotency key derived from the customer ID and invoice ID before calling the payment provider.
+
+Key components:
+- Account settings payment method form
+- Payment provider tokenization API
+- Subscription billing service
+- Invoice retry worker
+- Billing event log
+- Duplicate-charge guard based on idempotency keys
+`
+
+const saasAssuranceFeature = `Feature: Subscription billing release
+
+  @BEHAVIOR-001
+  Scenario: Customer updates payment method
+    Given a customer has an active subscription with an expired card
+    When the customer updates their payment method
+    Then the subscription stores the new payment provider token
+
+  @BEHAVIOR-002
+  Scenario: Failed invoice is retried
+    Given a customer has a past due invoice
+    When the customer updates their payment method
+    Then the billing service retries the failed invoice once
+
+  @BEHAVIOR-003
+  Scenario: Duplicate retry charge is prevented
+    Given a retry request is submitted twice for the same failed invoice
+    When the billing service handles the second retry request
+    Then it returns the original retry result without creating another charge
+`
+
+const saasAssuranceResults = `{
+  "scenarios_total": 3,
+  "scenarios_passed": 3,
+  "scenarios_failed": 0,
+  "failures": [],
+  "evidence": [
+    {
+      "id": "ASSURANCE-001",
+      "refs": ["BEHAVIOR-001"],
+      "source": "sample Cucumber billing report",
+      "status": "pass",
+      "summary": "Payment method update preserves subscription state and stores only the payment provider token."
+    },
+    {
+      "id": "ASSURANCE-002",
+      "refs": ["BEHAVIOR-002"],
+      "source": "sample Cucumber billing report",
+      "status": "pass",
+      "summary": "Failed invoice retry is triggered once after payment method update."
+    }
+  ]
+}
+`
+
+const saasSecurityGuardrails = `{
+  "violations": 0,
+  "findings": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "note": 0,
+    "unknown": 0
+  },
+  "evidence": [
+    {
+      "id": "SECURITY-001",
+      "refs": ["INTENT-001", "BEHAVIOR-001", "BEHAVIOR-003"],
+      "source": "sample payment security review",
+      "status": "pass",
+      "summary": "Payment details are tokenized by the payment provider, raw card data is not stored, and duplicate retry requests reuse idempotency keys."
+    }
+  ]
+}
+`
+
+const saasExecutionTelemetry = `{
+  "generated_at": "2026-04-30T12:00:00Z",
+  "window": {
+    "start": "2026-04-23T00:00:00Z",
+    "end": "2026-04-30T00:00:00Z"
+  },
+  "deployment_frequency": {
+    "deployments": 5,
+    "period_days": 7
+  },
+  "change_failure_rate": 0.04,
+  "adoption_rate": 0.68,
+  "error_rate": 0.015,
+  "user_override_rate": 0.02,
+  "source_environment": "sample",
+  "cost": {
+    "total": 82.4,
+    "currency": "USD",
+    "budget": 100,
+    "trend": "stable"
+  },
+  "evidence": [
+    {
+      "id": "EXECUTION-001",
+      "refs": ["BEHAVIOR-001", "BEHAVIOR-002", "ASSURANCE-001", "ASSURANCE-002"],
+      "source": "sample billing telemetry",
+      "status": "pass",
+      "summary": "Billing telemetry shows payment method updates and invoice retry events are being used with low error rate."
+    }
+  ]
+}
+`
+
+const saasValidationDocumentation = `# SaaS Billing Validation
+
+This starter models a Subscription Billing Release for a SaaS product.
+
+Start here:
+
+~~~sh
+bottleneck scorecard
+bottleneck scorecard --details
+bottleneck validate
+bottleneck scorecard --format=json
+bottleneck diagnose
+bottleneck trace BEHAVIOR-003
+~~~
+
+The starter intentionally leaves BEHAVIOR-003 without mapped assurance evidence so the first scorecard shows a concrete next action: add assurance evidence for payment retry behavior.
+
+Key evidence files:
+
+- bottleneck/intent/intent.md: customer and billing safety outcome.
+- bottleneck/behavior/behavior-spec.md: payment method update, failed invoice retry, and duplicate-charge prevention behavior.
+- bottleneck/design/architecture.md: tokenized billing retry flow.
+- bottleneck/assurance/results.json: sample test evidence with one intentional gap.
+- bottleneck/security/guardrails.json: tokenization and idempotency security evidence.
+- bottleneck/execution/telemetry.json: sample billing reliability and adoption telemetry.
+`
+
 const initSuccessMessage = `Bottleneck initialized.
 
 This starter uses the AI PDF Risk Summarizer sample and intentionally leaves Assurance weak so diagnose can show a real bottleneck.
@@ -263,6 +709,20 @@ Next:
 5. Replace sample intent and behavior with evidence from your own system
 
 Start with: bottleneck/intent/intent.md
+`
+
+const saasInitSuccessMessage = `Bottleneck initialized with the SaaS template.
+
+This starter uses a Subscription Billing Release and intentionally leaves BEHAVIOR-003 without mapped assurance evidence so diagnose can show a real bottleneck.
+
+Next:
+1. Run: bottleneck scorecard
+2. Review the release recommendation and primary bottleneck
+3. Run: bottleneck diagnose
+4. Inspect the gap: bottleneck trace BEHAVIOR-003
+5. Use details when needed: bottleneck scorecard --details
+
+Start with: bottleneck/behavior/behavior-spec.md
 `
 
 const validationDocumentation = `# Framework Validation
@@ -351,7 +811,7 @@ environments:
       max_error_rate: 0.05
       min_adoption: 0.5
       telemetry:
-        max_age_hours: 168
+        max_age_hours: 0
         min_deployments_per_week: 1
         max_change_failure_rate: 0.15
         max_error_rate: 0.05
@@ -367,21 +827,77 @@ environments:
         fail_on_unknown_severity: false
     gate:
       release:
-        min_primary_score: 60
+        min_primary_score: 70
         required_categories:
           - Intent
           - Behavior
           - Assurance
           - Security
           - Execution
-        require_traceability: true
+        require_traceability: false
         require_governance: false
-  production:
+  local:
     assurance:
-      min_accuracy: 0.95
+      min_accuracy: 0.75
+      max_failures: 5
+    security:
+      sarif:
+        max_critical: 1
+        max_high: 1
+    gate:
+      release:
+        min_primary_score: 60
+        require_traceability: false
+  dev:
+    assurance:
+      min_accuracy: 0.85
+      max_failures: 2
+    gate:
+      release:
+        min_primary_score: 65
+        require_traceability: false
+  test:
+    assurance:
+      min_accuracy: 0.92
+    security:
+      sarif:
+        max_medium: 2
     gate:
       release:
         min_primary_score: 75
+        require_traceability: true
+  stage:
+    assurance:
+      min_accuracy: 0.95
+    execution:
+      telemetry:
+        max_age_hours: 168
+    security:
+      sarif:
+        max_medium: 1
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 80
+        require_traceability: true
+  production:
+    assurance:
+      min_accuracy: 0.97
+    execution:
+      telemetry:
+        max_age_hours: 48
+        max_error_rate: 0.02
+        min_adoption_rate: 0.70
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 0
+        max_low: 0
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 85
         require_traceability: true
         require_governance: true
 ~~~
@@ -476,8 +992,9 @@ bottleneck validate loads config.yaml first, resolves inherited thresholds, and 
 ~~~sh
 bottleneck validate --env=production
 bottleneck ingest cucumber --file reports/cucumber.json
-bottleneck ingest sarif --file results/codeql.sarif
-bottleneck ingest telemetry --file results/telemetry.json
+bottleneck ingest sarif --file reports/codeql.sarif
+bottleneck ingest test-summary --file reports/test-summary.json
+bottleneck ingest telemetry --file reports/telemetry.json
 ~~~
 
 - Behavior -> validateBehavior()
@@ -595,33 +1112,68 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize local evidence artifacts",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := initializeProject("."); err != nil {
+		template, err := initTemplateDefinitionFor(initTemplate)
+		if err != nil {
 			return err
 		}
 
-		fmt.Print(initSuccessMessage)
+		if err := initializeProjectFromTemplate(".", template); err != nil {
+			return err
+		}
+
+		fmt.Print(template.message)
 		return nil
 	},
 }
 
 func init() {
+	initCmd.Flags().StringVar(&initTemplate, "template", initTemplateDefault, "starter template to create: default or saas")
 	rootCmd.AddCommand(initCmd)
 }
 
 func initializeProject(basePath string) error {
+	return initializeProjectWithTemplate(basePath, initTemplateDefault)
+}
+
+func initializeProjectWithTemplate(basePath string, templateName string) error {
+	template, err := initTemplateDefinitionFor(templateName)
+	if err != nil {
+		return err
+	}
+	return initializeProjectFromTemplate(basePath, template)
+}
+
+func initializeProjectFromTemplate(basePath string, template initTemplateDefinition) error {
 	for _, dir := range initDirectories {
 		if err := os.MkdirAll(filepath.Join(basePath, dir), 0o755); err != nil {
 			return err
 		}
 	}
 
-	for relativePath, content := range initFiles {
+	for relativePath, content := range template.files {
 		if err := writeFileIfMissing(filepath.Join(basePath, relativePath), content); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func initTemplateDefinitionFor(templateName string) (initTemplateDefinition, error) {
+	switch templateName {
+	case "", initTemplateDefault:
+		return initTemplateDefinition{
+			files:   initFiles,
+			message: initSuccessMessage,
+		}, nil
+	case initTemplateSaaS:
+		return initTemplateDefinition{
+			files:   saasInitFiles,
+			message: saasInitSuccessMessage,
+		}, nil
+	default:
+		return initTemplateDefinition{}, fmt.Errorf("unsupported init template %q (supported: default, saas)", templateName)
+	}
 }
 
 func writeFileIfMissing(path string, content string) error {

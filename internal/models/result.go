@@ -46,6 +46,7 @@ type EffectiveThresholds struct {
 	Assurance AssuranceThresholds `json:"assurance"`
 	Execution ExecutionThresholds `json:"execution"`
 	Security  SecurityThresholds  `json:"security"`
+	Gate      GateThresholds      `json:"gate"`
 }
 
 type AssuranceThresholds struct {
@@ -61,6 +62,7 @@ type ExecutionThresholds struct {
 
 type TelemetryThresholds struct {
 	MaxAgeHours           int     `json:"max_age_hours"`
+	StaleAllowed          bool    `json:"stale_allowed"`
 	MinDeploymentsPerWeek float64 `json:"min_deployments_per_week"`
 	MaxChangeFailureRate  float64 `json:"max_change_failure_rate"`
 	MaxErrorRate          float64 `json:"max_error_rate"`
@@ -79,4 +81,15 @@ type SARIFThresholds struct {
 	MaxMedium             int  `json:"max_medium"`
 	MaxLow                int  `json:"max_low"`
 	FailOnUnknownSeverity bool `json:"fail_on_unknown_severity"`
+}
+
+type GateThresholds struct {
+	Release ReleaseGateThresholds `json:"release"`
+}
+
+type ReleaseGateThresholds struct {
+	MinPrimaryScore     int      `json:"min_primary_score"`
+	RequiredCategories  []string `json:"required_categories"`
+	RequireTraceability bool     `json:"require_traceability"`
+	RequireGovernance   bool     `json:"require_governance"`
 }

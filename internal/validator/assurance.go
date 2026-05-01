@@ -29,11 +29,7 @@ func validateAssurance(rootPath string, cfg config.AssuranceConfig, strictValues
 	path := filepath.Join(rootPath, "assurance", "results.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return models.ValidationResult{
-			Capability: "Assurance",
-			Status:     models.StatusFail,
-			Message:    "missing results.json",
-		}
+		return artifactReadErrorResult(rootPath, "Assurance", "assurance/results.json", err)
 	}
 
 	var results metrics.AssuranceResults

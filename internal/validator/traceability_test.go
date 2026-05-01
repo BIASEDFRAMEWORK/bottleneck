@@ -62,3 +62,23 @@ func TestSimpleJSONArtifactsWithoutEvidenceStillValidateButWarnTraceability(t *t
 		t.Fatalf("expected missing traceability ID detail, got %#v", traceability.Details)
 	}
 }
+
+func TestBrokenEvidenceReferenceIncludesTraceSuggestion(t *testing.T) {
+	basePath := t.TempDir()
+	writeValidationProject(t, basePath, map[string]string{
+		"bottleneck/behavior/behavior-spec.md": "# Behavior Specification\n\n## Expected Behavior\n\n### BEHAVIOR-001: Block unsafe release\nRefs:\n- INTENT-001\n- ASSURANCE-009\n\nThe system blocks unsafe releases when assurance is missing.\n\n## Unacceptable Behavior\n\nThe system must not ignore failed assurance.\n",
+	})
+
+	result := NewEngine(basePath, "default").Validate()
+	traceability := resultForCapability(t, result, "Traceability")
+
+	for _, substring := range []string{
+		"bottleneck/behavior/behavior-spec.md BEHAVIOR-001 references missing ASSURANCE-009",
+		"Next action: add ASSURANCE-009 or inspect the source trace:",
+		"bottleneck trace BEHAVIOR-001",
+	} {
+		if !containsDetail(traceability.Details, substring) {
+			t.Fatalf("expected broken-reference guidance %q, got %#v", substring, traceability.Details)
+		}
+	}
+}

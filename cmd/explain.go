@@ -18,7 +18,7 @@ var explainStrict bool
 
 var explainCmd = &cobra.Command{
 	Use:   "explain",
-	Short: "Explain the current validation state in human-readable form",
+	Short: "Show how evidence affected category scores",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		engine := validator.NewEngine(".", explainEnv, validator.WithStrictMode(explainStrict))
 		result := engine.Validate()

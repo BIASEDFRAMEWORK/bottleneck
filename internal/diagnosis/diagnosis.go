@@ -26,6 +26,13 @@ const (
 type Diagnosis struct {
 	PrimaryBottleneck    string          `json:"primary_bottleneck"`
 	TiedBottlenecks      []string        `json:"tied_bottlenecks,omitempty"`
+	Rule                 string          `json:"rule,omitempty"`
+	Reason               string          `json:"reason"`
+	Impact               string          `json:"impact"`
+	NextAction           string          `json:"next_action"`
+	InspectCommand       string          `json:"inspect_command"`
+	RelevantEvidenceIDs  []string        `json:"relevant_evidence_ids,omitempty"`
+	SupportingIssues     []string        `json:"supporting_issues,omitempty"`
 	WhyItMatters         string          `json:"why_it_matters"`
 	RecommendedAction    string          `json:"recommended_action"`
 	ContributingFindings []string        `json:"contributing_findings,omitempty"`
@@ -52,6 +59,12 @@ var categoryOrder = []string{"Behavior", "Intent", "Design", "Assurance", "Secur
 var tiePriorityOrder = []string{"Assurance", "Security", "Behavior", "Intent", "Execution", "Design"}
 
 var categoryInfo = map[string]CategoryInfo{
+	"Config": {
+		Owner:        "Execution Engineer",
+		Bottleneck:   "Invalid configuration",
+		WhyItMatters: "Environment and threshold configuration controls how evidence is interpreted. If it cannot be resolved, the release decision cannot be trusted.",
+		HealthyText:  "Configuration thresholds are available for the selected environment.",
+	},
 	"Intent": {
 		Owner:        "Intent Engineer",
 		Bottleneck:   "Ambiguous requirements",
@@ -99,6 +112,7 @@ var categoryInfo = map[string]CategoryInfo{
 func Analyze(result models.EngineResult) Diagnosis {
 	resultsByCategory := map[string]models.ValidationResult{}
 	traceabilityResults := make([]models.ValidationResult, 0, 1)
+	configFailure, hasConfigFailure := firstConfigFailure(result)
 	for _, validation := range result.Results {
 		if isDiagnosableCategory(validation.Capability) {
 			resultsByCategory[validation.Capability] = validation
@@ -132,12 +146,62 @@ func Analyze(result models.EngineResult) Diagnosis {
 	}
 	confidence, confidenceReason := Confidence(result)
 
+	if hasConfigFailure {
+		findings := ContributingFindings(result, "Config")
+		actionable := actionableFor(result, "Config", configFailure, traceabilityResults, findings)
+		return Diagnosis{
+			PrimaryBottleneck:    "Config",
+			Rule:                 actionable.Rule,
+			Reason:               actionable.Reason,
+			Impact:               actionable.Impact,
+			NextAction:           actionable.NextAction,
+			InspectCommand:       actionable.InspectCommand,
+			RelevantEvidenceIDs:  actionable.RelevantEvidenceIDs,
+			SupportingIssues:     actionable.SupportingIssues,
+			WhyItMatters:         WhyItMatters("Config"),
+			RecommendedAction:    actionable.NextAction,
+			ContributingFindings: findings,
+			Confidence:           confidence,
+			ConfidenceReason:     confidenceReason,
+			CategoryScores:       scores,
+		}
+	}
+
 	if len(scores) == 0 || allStrong(scores) {
+		if rule, ok := highestActionableRule(result); ok && rule.Category == "Traceability" {
+			findings := ContributingFindings(result, rule.Category)
+			actionable := actionableFor(result, rule.Category, models.ValidationResult{}, traceabilityResults, findings)
+			return Diagnosis{
+				PrimaryBottleneck:    rule.Category,
+				Rule:                 actionable.Rule,
+				Reason:               actionable.Reason,
+				Impact:               actionable.Impact,
+				NextAction:           actionable.NextAction,
+				InspectCommand:       actionable.InspectCommand,
+				RelevantEvidenceIDs:  actionable.RelevantEvidenceIDs,
+				SupportingIssues:     actionable.SupportingIssues,
+				WhyItMatters:         WhyItMatters(rule.Category),
+				RecommendedAction:    actionable.NextAction,
+				ContributingFindings: findings,
+				Confidence:           confidence,
+				ConfidenceReason:     confidenceReason,
+				CategoryScores:       scores,
+			}
+		}
+		findings := ContributingFindings(result, HealthyPrimaryBottleneck)
+		actionable := actionableFor(result, HealthyPrimaryBottleneck, models.ValidationResult{}, nil, findings)
 		return Diagnosis{
 			PrimaryBottleneck:    HealthyPrimaryBottleneck,
+			Rule:                 actionable.Rule,
+			Reason:               actionable.Reason,
+			Impact:               actionable.Impact,
+			NextAction:           actionable.NextAction,
+			InspectCommand:       actionable.InspectCommand,
+			RelevantEvidenceIDs:  actionable.RelevantEvidenceIDs,
+			SupportingIssues:     actionable.SupportingIssues,
 			WhyItMatters:         "All assessed delivery categories have enough evidence to support the current release decision.",
 			RecommendedAction:    "Keep evidence current as intent, behavior, implementation, and production signals change.",
-			ContributingFindings: ContributingFindings(result, HealthyPrimaryBottleneck),
+			ContributingFindings: findings,
 			Confidence:           confidence,
 			ConfidenceReason:     confidenceReason,
 			CategoryScores:       scores,
@@ -153,18 +217,41 @@ func Analyze(result models.EngineResult) Diagnosis {
 
 	tied := tiedBottlenecks(scores, lowestScore)
 	primary := tied[0]
+	rulePrimary := primaryFromActionableRules(result, primary)
+	if rulePrimary != primary {
+		primary = rulePrimary
+		tied = []string{primary}
+	}
 	validation := resultsByCategory[primary]
+	findings := ContributingFindings(result, primary)
+	actionable := actionableFor(result, primary, validation, traceabilityResults, findings)
 
 	return Diagnosis{
 		PrimaryBottleneck:    primary,
 		TiedBottlenecks:      tiedIfMultiple(tied),
+		Rule:                 actionable.Rule,
+		Reason:               actionable.Reason,
+		Impact:               actionable.Impact,
+		NextAction:           actionable.NextAction,
+		InspectCommand:       actionable.InspectCommand,
+		RelevantEvidenceIDs:  actionable.RelevantEvidenceIDs,
+		SupportingIssues:     actionable.SupportingIssues,
 		WhyItMatters:         WhyItMatters(primary),
-		RecommendedAction:    RecommendedAction(validation),
-		ContributingFindings: ContributingFindings(result, primary),
+		RecommendedAction:    recommendedActionForPrimary(primary, validation, traceabilityResults),
+		ContributingFindings: findings,
 		Confidence:           confidence,
 		ConfidenceReason:     confidenceReason,
 		CategoryScores:       scores,
 	}
+}
+
+func firstConfigFailure(result models.EngineResult) (models.ValidationResult, bool) {
+	for _, validation := range result.Results {
+		if validation.Capability == "Config" && validation.Status != models.StatusPass {
+			return validation, true
+		}
+	}
+	return models.ValidationResult{}, false
 }
 
 func Info(category string) CategoryInfo {
@@ -194,9 +281,18 @@ func RecommendedAction(validation models.ValidationResult) string {
 	combined := strings.TrimSpace(message + "\n" + details)
 
 	switch {
+	case category == "Config" && strings.Contains(combined, "no bottleneck config found"):
+		return "Bottleneck has not been initialized in this directory. Initialize a SaaS starter project: bottleneck init --template saas."
+	case category == "Config" && strings.Contains(combined, "unknown environment"):
+		return "Choose a supported environment, for example: bottleneck scorecard --env=production."
+	case category == "Assurance" && strings.Contains(combined, "no assurance evidence found"):
+		return "Add test evidence manually or run: bottleneck ingest cucumber --file reports/cucumber.json."
+	case category == "Assurance" && (strings.Contains(combined, "behavior-003") || strings.Contains(combined, "payment retry")):
+		return "Add assurance evidence for payment retry behavior."
 	case category == "Assurance" && strings.Contains(combined, "ambiguous risk"):
 		return "Add or fix evaluation evidence for BEHAVIOR-001 so ambiguous financial risk language is flagged as uncertain."
-	case strings.Contains(combined, "not linked") ||
+	case strings.Contains(combined, "no mapped test evidence") ||
+		strings.Contains(combined, "not linked") ||
 		strings.Contains(combined, "references missing") ||
 		strings.Contains(combined, "cannot reference") ||
 		strings.Contains(combined, "orphan"):
@@ -227,6 +323,49 @@ func RecommendedAction(validation models.ValidationResult) string {
 	default:
 		return "Run validation and inspect the affected artifact before making a release decision."
 	}
+}
+
+func recommendedActionForPrimary(primary string, validation models.ValidationResult, traceabilityResults []models.ValidationResult) string {
+	if validation.Status == models.StatusPass {
+		if action := traceabilityRecommendedAction(primary, traceabilityResults); action != "" {
+			return action
+		}
+	}
+	return RecommendedAction(validation)
+}
+
+func traceabilityRecommendedAction(primary string, traceabilityResults []models.ValidationResult) string {
+	for _, validation := range traceabilityResults {
+		if validation.Status == models.StatusPass || !traceabilityResultRelatesTo(validation, primary) {
+			continue
+		}
+		combined := strings.ToLower(traceabilityCombinedText(validation))
+		if primary == "Assurance" && (strings.Contains(combined, "behavior-003") ||
+			strings.Contains(combined, "payment retry") ||
+			strings.Contains(combined, "duplicate-charge") ||
+			strings.Contains(combined, "duplicate charges")) {
+			return "Add assurance evidence for payment retry behavior."
+		}
+		if primary == "Assurance" && (strings.Contains(combined, "no mapped test evidence") ||
+			strings.Contains(combined, "no assurance result") ||
+			strings.Contains(combined, "not linked to assurance evidence")) {
+			return disconnectedEvidenceAction("Assurance")
+		}
+		return disconnectedEvidenceAction(primary)
+	}
+	return ""
+}
+
+func traceabilityCombinedText(validation models.ValidationResult) string {
+	parts := []string{validation.Message}
+	parts = append(parts, validation.Details...)
+	for _, finding := range validation.Findings {
+		parts = append(parts, finding.Message)
+	}
+	for _, impact := range validation.EvidenceQuality.ScoreImpacts {
+		parts = append(parts, impact.Reason)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func ScoreFor(category string, scores []CategoryScore) int {
@@ -544,6 +683,7 @@ func applyTraceabilityAdjustments(scoreByCategory map[string]int, traceabilityRe
 func categoryFromTraceabilityDetail(detail string) string {
 	lower := strings.ToLower(detail)
 	if strings.Contains(lower, "no assurance result references") ||
+		strings.Contains(lower, "no mapped test evidence") ||
 		strings.Contains(lower, "not linked to assurance evidence") ||
 		strings.Contains(lower, "without assurance") {
 		return "Assurance"
@@ -626,6 +766,8 @@ func reasonFor(validation models.ValidationResult) string {
 
 func missingEvidenceAction(category string) string {
 	switch category {
+	case "Config":
+		return "Repair bottleneck/config.yaml so the selected environment and thresholds can be resolved."
 	case "Intent":
 		return "Create bottleneck/intent/intent.md with 1-3 measurable outcomes, constraints, and success criteria."
 	case "Behavior":

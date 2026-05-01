@@ -25,11 +25,7 @@ func validateIntent(rootPath string, strict bool) models.ValidationResult {
 	path := filepath.Join(rootPath, "intent", "intent.md")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return models.ValidationResult{
-			Capability: "Intent",
-			Status:     models.StatusFail,
-			Message:    "missing intent.md",
-		}
+		return artifactReadErrorResult(rootPath, "Intent", "intent/intent.md", err)
 	}
 
 	text := strings.TrimSpace(string(content))

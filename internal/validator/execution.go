@@ -61,11 +61,7 @@ func validateExecution(rootPath string, cfg config.ExecutionConfig, strictValues
 	path := filepath.Join(rootPath, "execution", "telemetry.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return models.ValidationResult{
-			Capability: "Execution",
-			Status:     models.StatusFail,
-			Message:    "missing telemetry.json",
-		}
+		return artifactReadErrorResult(rootPath, "Execution", "execution/telemetry.json", err)
 	}
 
 	var data executionFile

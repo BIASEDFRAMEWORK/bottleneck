@@ -103,8 +103,27 @@ func traceabilityFindingDetails(findings []traceability.Finding) []string {
 	details := make([]string, 0, len(findings))
 	for _, finding := range findings {
 		details = append(details, finding.Message)
+		if nextAction := brokenReferenceNextAction(finding); nextAction != nil {
+			details = append(details, nextAction...)
+		}
 	}
 	return details
+}
+
+func brokenReferenceNextAction(finding traceability.Finding) []string {
+	if finding.Severity != traceability.SeverityFail || finding.ReferenceID == "" {
+		return nil
+	}
+	lower := strings.ToLower(finding.Message)
+	if !strings.Contains(lower, "references missing") && !strings.Contains(lower, "invalid reference") {
+		return nil
+	}
+	action := "Next action: update the referenced evidence file."
+	if finding.SourceID != "" {
+		action = "Next action: add " + finding.ReferenceID + " or inspect the source trace:"
+		return []string{action, "  bottleneck trace " + finding.SourceID}
+	}
+	return []string{action}
 }
 
 func traceabilityEvidenceQuality(findings []traceability.Finding) models.EvidenceQuality {
@@ -133,6 +152,7 @@ func traceabilityPenalty(finding traceability.Finding) int {
 	}
 	if strings.HasPrefix(finding.SourceID, "BEHAVIOR-") &&
 		(strings.Contains(finding.Message, "no assurance result references") ||
+			strings.Contains(finding.Message, "no mapped test evidence") ||
 			strings.Contains(finding.Message, "not linked to assurance evidence") ||
 			strings.Contains(finding.Message, "not linked to intent evidence")) {
 		return -25

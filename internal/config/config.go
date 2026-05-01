@@ -1,7 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -101,6 +104,43 @@ func Load(path string) (Config, error) {
 }
 
 func ResolveEnvironment(cfg Config, env string) EnvironmentConfig {
+	resolved, err := ResolveEnvironmentStrict(cfg, env)
+	if err != nil {
+		return resolveEnvironmentUnchecked(cfg, "default")
+	}
+	return resolved
+}
+
+func ResolveEnvironmentStrict(cfg Config, env string) (EnvironmentConfig, error) {
+	env = strings.TrimSpace(env)
+	if env == "" {
+		env = "default"
+	}
+	if env != "default" {
+		if _, ok := cfg.Environments[env]; !ok {
+			return EnvironmentConfig{}, fmt.Errorf("unknown environment %q (supported: %s)", env, strings.Join(SupportedEnvironments(cfg), ", "))
+		}
+	}
+	return resolveEnvironmentUnchecked(cfg, env), nil
+}
+
+func SupportedEnvironments(cfg Config) []string {
+	seen := map[string]struct{}{"default": {}}
+	for env := range cfg.Environments {
+		if strings.TrimSpace(env) == "" {
+			continue
+		}
+		seen[env] = struct{}{}
+	}
+	values := make([]string, 0, len(seen))
+	for env := range seen {
+		values = append(values, env)
+	}
+	sort.Strings(values)
+	return values
+}
+
+func resolveEnvironmentUnchecked(cfg Config, env string) EnvironmentConfig {
 	resolved := cfg.Environments["default"]
 	resolved.Security.SARIF = mergeSARIF(defaultSARIFConfig(), resolved.Security.SARIF)
 	resolved.Execution.Telemetry = mergeTelemetry(defaultTelemetryConfig(), resolved.Execution.Telemetry)

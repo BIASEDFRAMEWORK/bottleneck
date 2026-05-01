@@ -25,11 +25,7 @@ func validateDesign(rootPath string, strict bool) models.ValidationResult {
 	path := filepath.Join(rootPath, "design", "architecture.md")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return models.ValidationResult{
-			Capability: "Design",
-			Status:     models.StatusFail,
-			Message:    "missing architecture.md",
-		}
+		return artifactReadErrorResult(rootPath, "Design", "design/architecture.md", err)
 	}
 
 	text := strings.TrimSpace(string(content))

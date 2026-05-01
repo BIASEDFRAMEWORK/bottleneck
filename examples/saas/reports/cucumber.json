@@ -1,0 +1,79 @@
+[
+  {
+    "name": "Subscription Billing Release",
+    "elements": [
+      {
+        "name": "Customer updates payment method for active subscription",
+        "type": "scenario",
+        "tags": [
+          {"name": "@BEHAVIOR-001"}
+        ],
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "a customer has an active subscription with an expired card",
+            "result": {"status": "passed"}
+          },
+          {
+            "keyword": "When ",
+            "name": "the customer updates their payment method",
+            "result": {"status": "passed"}
+          },
+          {
+            "keyword": "Then ",
+            "name": "the subscription stores only the payment provider token",
+            "result": {"status": "passed"}
+          }
+        ]
+      },
+      {
+        "name": "Failed invoice is retried after payment method update",
+        "type": "scenario",
+        "tags": [
+          {"name": "@BEHAVIOR-002"}
+        ],
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "a customer has a past due invoice",
+            "result": {"status": "passed"}
+          },
+          {
+            "keyword": "When ",
+            "name": "the customer updates their payment method",
+            "result": {"status": "passed"}
+          },
+          {
+            "keyword": "Then ",
+            "name": "the billing service retries the failed invoice once",
+            "result": {"status": "passed"}
+          }
+        ]
+      },
+      {
+        "name": "Duplicate retry charge is prevented",
+        "type": "scenario",
+        "tags": [
+          {"name": "@BEHAVIOR-003"}
+        ],
+        "steps": [
+          {
+            "keyword": "Given ",
+            "name": "a retry request is submitted twice for the same failed invoice",
+            "result": {"status": "passed"}
+          },
+          {
+            "keyword": "When ",
+            "name": "the billing service handles the second retry request",
+            "result": {"status": "passed"}
+          },
+          {
+            "keyword": "Then ",
+            "name": "it returns the original retry result without creating another charge",
+            "result": {"status": "passed"}
+          }
+        ]
+      }
+    ]
+  }
+]

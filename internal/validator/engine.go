@@ -1,7 +1,10 @@
 package validator
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"bottleneck/internal/config"
 	"bottleneck/internal/models"
@@ -16,6 +19,7 @@ type Engine struct {
 	environment         string
 	effectiveThresholds models.EffectiveThresholds
 	configLoadErr       error
+	configLoadDetails   []string
 }
 
 type EngineOptions struct {
@@ -39,13 +43,22 @@ func NewEngine(basePath string, env string, optionFuncs ...EngineOption) *Engine
 	bottleneckRoot := filepath.Join(basePath, "bottleneck")
 	cfg, err := config.Load(filepath.Join(bottleneckRoot, "config.yaml"))
 	if err != nil {
+		message, details := configLoadGuidance(err)
 		return &Engine{
-			environment:   env,
-			configLoadErr: err,
+			environment:       env,
+			configLoadErr:     errConfigLoad(message, err),
+			configLoadDetails: details,
 		}
 	}
 
-	envConfig := config.ResolveEnvironment(cfg, env)
+	envConfig, err := config.ResolveEnvironmentStrict(cfg, env)
+	if err != nil {
+		return &Engine{
+			environment:       env,
+			configLoadErr:     err,
+			configLoadDetails: environmentGuidanceDetails(cfg),
+		}
+	}
 
 	return &Engine{
 		environment:         env,
@@ -68,7 +81,8 @@ func (e *Engine) Validate() models.EngineResult {
 			Results: []models.ValidationResult{{
 				Capability: "Config",
 				Status:     models.StatusFail,
-				Message:    "missing or invalid config.yaml",
+				Message:    e.configLoadErr.Error(),
+				Details:    e.configLoadDetails,
 			}},
 			SystemStatus:        models.StatusFail,
 			PrimaryBottleneck:   "Config",
@@ -118,6 +132,7 @@ func effectiveThresholdsFromConfig(envConfig config.EnvironmentConfig) models.Ef
 			MinAdoption:  envConfig.Execution.MinAdoption,
 			Telemetry: models.TelemetryThresholds{
 				MaxAgeHours:           envConfig.Execution.Telemetry.MaxAgeHours,
+				StaleAllowed:          envConfig.Execution.Telemetry.MaxAgeHours <= 0,
 				MinDeploymentsPerWeek: envConfig.Execution.Telemetry.MinDeploymentsPerWeek,
 				MaxChangeFailureRate:  envConfig.Execution.Telemetry.MaxChangeFailureRate,
 				MaxErrorRate:          envConfig.Execution.Telemetry.MaxErrorRate,
@@ -135,5 +150,59 @@ func effectiveThresholdsFromConfig(envConfig config.EnvironmentConfig) models.Ef
 				FailOnUnknownSeverity: envConfig.Security.SARIF.FailOnUnknownSeverity,
 			},
 		},
+		Gate: models.GateThresholds{
+			Release: models.ReleaseGateThresholds{
+				MinPrimaryScore:     envConfig.Gate.Release.MinPrimaryScore,
+				RequiredCategories:  append([]string{}, envConfig.Gate.Release.RequiredCategories...),
+				RequireTraceability: envConfig.Gate.Release.RequireTraceability,
+				RequireGovernance:   envConfig.Gate.Release.RequireGovernance,
+			},
+		},
 	}
+}
+
+func configLoadGuidance(err error) (string, []string) {
+	if errors.Is(err, os.ErrNotExist) {
+		return "No Bottleneck config found.", []string{
+			"Bottleneck has not been initialized in this directory.",
+			"Next action: initialize a SaaS starter project:",
+			"  bottleneck init --template saas",
+		}
+	}
+	return "Invalid Bottleneck config.", []string{
+		"bottleneck/config.yaml could not be parsed: " + err.Error(),
+		"Next action: repair bottleneck/config.yaml or run `bottleneck init --template saas` in a new project for an example.",
+	}
+}
+
+func environmentGuidanceDetails(cfg config.Config) []string {
+	supported := config.SupportedEnvironments(cfg)
+	display := make([]string, 0, len(supported))
+	for _, env := range supported {
+		if env == "default" {
+			continue
+		}
+		display = append(display, env)
+	}
+	if len(display) == 0 {
+		display = supported
+	}
+	return []string{
+		"Next action: choose one of: " + strings.Join(display, ", ") + ".",
+		"Example:",
+		"  bottleneck scorecard --env=production",
+	}
+}
+
+func errConfigLoad(message string, err error) error {
+	return configLoadError{message: message, err: err}
+}
+
+type configLoadError struct {
+	message string
+	err     error
+}
+
+func (e configLoadError) Error() string {
+	return e.message
 }

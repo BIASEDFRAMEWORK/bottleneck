@@ -1,0 +1,51 @@
+name: bottleneck SaaS scorecard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: bottleneck environment to evaluate
+        default: default
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bottleneck:
+    name: bottleneck
+    runs-on: ubuntu-latest
+    env:
+      BOTTLENECK_ENV: ${{ github.event.inputs.environment || 'default' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build Bottleneck
+        run: go build -o ./bin/bottleneck .
+
+      - name: Validate Bottleneck evidence
+        continue-on-error: true
+        run: ./bin/bottleneck validate --env="$BOTTLENECK_ENV" --github-annotations
+
+      - name: Write Bottleneck scorecard summary
+        if: always()
+        run: ./bin/bottleneck scorecard --env="$BOTTLENECK_ENV" --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Emit Bottleneck annotations
+        if: always()
+        run: ./bin/bottleneck diagnose --env="$BOTTLENECK_ENV" --format=github || true
+
+      - name: Check release readiness
+        if: always()
+        run: ./bin/bottleneck diagnose --env="$BOTTLENECK_ENV" --gate=release

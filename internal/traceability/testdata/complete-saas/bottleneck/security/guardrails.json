@@ -1,0 +1,20 @@
+{
+  "violations": 0,
+  "findings": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "note": 0,
+    "unknown": 0
+  },
+  "evidence": [
+    {
+      "id": "SECURITY-001",
+      "refs": ["INTENT-001", "BEHAVIOR-001", "BEHAVIOR-002", "BEHAVIOR-003"],
+      "source": "sample payment security review",
+      "status": "pass",
+      "summary": "Payment details are tokenized by the payment provider, raw card data is not stored, and duplicate retry requests reuse idempotency keys."
+    }
+  ]
+}

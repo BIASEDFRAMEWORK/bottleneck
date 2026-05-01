@@ -1,9 +1,144 @@
 # bottleneck
 
+Bottleneck helps a SaaS team diagnose delivery risk before a release by reading local evidence artifacts, producing a release readiness scorecard, and naming the primary bottleneck diagnosis with the next evidence action. It does not replace tests, CI, security scanners, or observability tools; it connects their outputs so a team can see whether behavior, intent, design, assurance, security, and execution evidence are strong enough to ship.
+
+## SaaS Team Quickstart
+
+Create a Subscription Billing Release starter:
+
+```sh
+bottleneck init --template saas
+bottleneck scorecard
+bottleneck diagnose
+bottleneck trace BEHAVIOR-003
+```
+
+`scorecard` is the primary Day-One command: it puts the release recommendation, primary bottleneck, category results, why it matters, and next action at the top of the terminal output. Use `validate` as a supporting evidence-quality check and `scorecard --details` when you need the raw evidence, thresholds, missing evidence, and score impacts.
+
+The SaaS template creates:
+
+```text
+bottleneck/
+  config.yaml
+  behavior/behavior-spec.md
+  intent/intent.md
+  design/architecture.md
+  assurance/features/sample.feature
+  assurance/results.json
+  security/guardrails.json
+  execution/telemetry.json
+  docs/validation.md
+```
+
+The starter models payment method updates and failed invoice retries. It intentionally leaves `BEHAVIOR-003` without mapped test evidence so the first scorecard shows a warning-only release posture instead of a perfect sample.
+
+Bad starter scorecard example:
+
+```text
+Bottleneck Scorecard
+Environment: default
+Release Recommendation: Conditional
+Primary Bottleneck: Assurance
+
+Category Results:
+- Intent: Pass
+- Behavior: Pass
+- Design: Pass
+- Assurance: Warn
+- Security: Pass
+- Execution: Pass
+
+Why:
+BEHAVIOR-003 payment retry behavior has no mapped test evidence.
+
+Next Action:
+Add assurance evidence for payment retry behavior. Map it to BEHAVIOR-003.
+```
+
+JSON scorecard excerpt:
+
+```sh
+bottleneck scorecard --format=json
+```
+
+```json
+{
+  "schema_version": "scorecard.v2",
+  "environment": "default",
+  "system_status": "WARN",
+  "release_recommendation": "Conditional",
+  "primary_bottleneck": "Assurance",
+  "diagnosis": {
+    "recommended_action": "Add assurance evidence for payment retry behavior."
+  }
+}
+```
+
+Good scorecard example after adding mapped assurance evidence for `BEHAVIOR-003`:
+
+```text
+Bottleneck Scorecard
+Environment: default
+Release Recommendation: Proceed
+Primary Bottleneck: None
+```
+
+Diagnosis and trace examples:
+
+```text
+Primary Bottleneck: Assurance
+Reason: BEHAVIOR-003 is not linked to any passing test evidence.
+Impact: Release confidence is reduced because payment retry behavior is unproven.
+Next Action: Add or ingest test evidence mapped to BEHAVIOR-003.
+Inspect: bottleneck trace BEHAVIOR-003
+```
+
+```text
+Trace: BEHAVIOR-003
+Missing links:
+- BEHAVIOR-003 has no mapped test evidence
+Recommendation:
+Add assurance evidence for payment retry behavior.
+```
+
+For the full walkthrough, including how to break and fix the evidence gap, see [docs/quickstart-saas.md](docs/quickstart-saas.md).
+
+For a copyable demo project with the intentional `BEHAVIOR-003` assurance gap, sample reports, and GitHub Actions workflow, see [examples/saas-billing](examples/saas-billing).
+
+Sample SaaS report files live in `examples/saas/reports/` so you can try ingestion immediately:
+
+```sh
+bottleneck ingest cucumber --file reports/cucumber.json
+bottleneck ingest sarif --file reports/codeql.sarif
+bottleneck ingest test-summary --file reports/test-summary.json
+bottleneck ingest telemetry --file reports/telemetry.json
+```
+
+The Cucumber and test-summary samples write `bottleneck/assurance/results.json` and can cover `BEHAVIOR-003` with mapped `ASSURANCE-*` evidence. The SARIF sample writes `bottleneck/security/guardrails.json` and links a low-severity `SECURITY-001` finding to billing retry behavior. The telemetry sample writes `bottleneck/execution/telemetry.json` and links `EXECUTION-001` to the billing behaviors and assurance IDs.
+
+Detailed scorecard mode:
+
+```sh
+bottleneck scorecard --details
+```
+
+Minimal CI usage with currently supported commands:
+
+```yaml
+- name: Validate Bottleneck evidence
+  run: bottleneck validate
+
+- name: Generate Bottleneck scorecard
+  run: bottleneck scorecard --format=markdown >> "$GITHUB_STEP_SUMMARY"
+
+- name: Check release readiness
+  run: bottleneck diagnose --gate=release
+```
+
+Use `bottleneck diagnose --format=github` or `bottleneck validate --github-annotations` when you want GitHub Actions annotations.
+
 BIASED is the evidence model.
 Bottleneck is the CLI that diagnoses delivery risk using that model.
-
-Bottleneck evaluates a repo or release using local evidence artifacts. It diagnoses release readiness, hidden delivery risk, and evidence gaps before a team treats a change as ready to ship.
 
 BIASED stands for:
 
@@ -26,6 +161,8 @@ Bottleneck evaluates one repo or release at a time. Useful scopes include:
 - platform repo
 
 Team and organization-level views can come later by aggregating repo scorecards.
+
+The goal is to surface hidden delivery risk while the team can still add, fix, or connect the evidence.
 
 ## AI And Non-AI Systems
 
@@ -73,7 +210,17 @@ Execution reveals truth. Truth updates Behavior and Intent.
 
 ### `bottleneck init`
 
-Creates the local evidence artifact structure with a realistic starter sample: `AI PDF Risk Summarizer`.
+Creates the local evidence artifact structure. Use the SaaS starter for the day-one Subscription Billing Release quickstart:
+
+```sh
+bottleneck init --template saas
+```
+
+The default starter remains available:
+
+```sh
+bottleneck init
+```
 
 ```text
 bottleneck/
@@ -88,7 +235,7 @@ bottleneck/
   docs/validation.md
 ```
 
-First run:
+First default-starter run:
 
 ```sh
 bottleneck init
@@ -158,13 +305,13 @@ Ingest external tool output into normalized bottleneck artifacts.
 
 ```sh
 bottleneck ingest cucumber --file reports/cucumber.json
-bottleneck ingest sarif --file results/codeql.sarif
-bottleneck ingest codeql --file results/codeql.sarif
-bottleneck ingest test-summary --file results/test-summary.json
-bottleneck ingest telemetry --file results/telemetry.json
+bottleneck ingest sarif --file reports/codeql.sarif
+bottleneck ingest codeql --file reports/codeql.sarif
+bottleneck ingest test-summary --file reports/test-summary.json
+bottleneck ingest telemetry --file reports/telemetry.json
 ```
 
-Use `--dry-run` to parse and inspect normalized evidence without writing artifact files, and `--out` to override the default output path. Cucumber ingestion writes assurance evidence, SARIF/CodeQL ingestion writes security evidence, and telemetry ingestion writes execution evidence.
+Use `examples/saas/reports/*` to try these commands without real CI artifacts. Use `--dry-run` to parse and inspect normalized evidence without writing artifact files, and `--out` to override the default output path. Cucumber and test-summary ingestion write Assurance evidence to `bottleneck/assurance/results.json`; SARIF/CodeQL ingestion writes Security evidence to `bottleneck/security/guardrails.json`; telemetry ingestion writes Execution evidence to `bottleneck/execution/telemetry.json`. Evidence IDs are generated when the source format has no ID, and `refs` preserve links such as `BEHAVIOR-003` so `bottleneck scorecard` and `bottleneck trace BEHAVIOR-003` can show category impact after ingestion.
 
 ### `bottleneck explain`
 
@@ -255,6 +402,7 @@ Traces a stable evidence ID across intent, behavior, design, assurance, security
 Examples:
 
 ```sh
+bottleneck trace BEHAVIOR-003
 bottleneck trace --id INTENT-001
 bottleneck trace --id BEHAVIOR-001 --env=production
 bottleneck trace --id ASSURANCE-001 --format=json
@@ -272,13 +420,38 @@ Positional IDs such as `bottleneck trace BEHAVIOR-001` remain supported.
 
 Copyable workflow examples live in `examples/github-actions/`:
 
+- `bottleneck-saas-scorecard.yml`: Day-One SaaS workflow that validates evidence, writes a Markdown scorecard to the GitHub Actions step summary, emits annotations, and uses the release gate as the blocking check
 - `bottleneck-validate.yml`: runs `bottleneck validate`
 - `bottleneck-scorecard.yml`: writes a Markdown scorecard to GitHub Actions Step Summary
 - `bottleneck-pr-gate.yml`: runs validation, writes Step Summary output, emits annotations, and updates a stable PR comment
 
 Copy the workflow you want into `.github/workflows/` in the repository that owns the evidence artifacts.
 
-The PR gate uses the existing CLI exit behavior:
+For the SaaS Day-One workflow:
+
+```sh
+mkdir -p .github/workflows
+cp examples/github-actions/bottleneck-saas-scorecard.yml .github/workflows/bottleneck.yml
+```
+
+In a pull request, Bottleneck writes the scorecard to the GitHub Actions step summary. Developers see the release recommendation, primary bottleneck, category results, and next action in the check run. The workflow emits GitHub annotations with `bottleneck validate --github-annotations` and `bottleneck diagnose --format=github`; warnings appear as workflow warnings and blocking failures appear as errors.
+
+The Day-One workflow keeps validation and scorecard generation visible even when evidence is weak. The blocking CI result comes from:
+
+```sh
+./bin/bottleneck diagnose --env="$BOTTLENECK_ENV" --gate=release
+```
+
+Warnings can appear in the scorecard without failing the job when the selected environment and release gate thresholds treat them as non-blocking. Release blockers include critical evidence gaps such as missing required assurance, broken traceability, critical security findings, missing required categories, or production gate failures where configured.
+
+Tune the environment in the workflow by changing the command or workflow input:
+
+```sh
+./bin/bottleneck scorecard --env=stage --format=markdown >> "$GITHUB_STEP_SUMMARY"
+./bin/bottleneck diagnose --env=production --gate=release
+```
+
+The older PR gate example uses the existing CLI exit behavior and posts a stable PR comment:
 
 ```sh
 go build -o bottleneck .
@@ -371,7 +544,7 @@ environments:
       max_error_rate: 0.05
       min_adoption: 0.5
       telemetry:
-        max_age_hours: 168
+        max_age_hours: 0
         min_deployments_per_week: 1
         max_change_failure_rate: 0.15
         max_error_rate: 0.05
@@ -387,26 +560,82 @@ environments:
         fail_on_unknown_severity: false
     gate:
       release:
-        min_primary_score: 60
+        min_primary_score: 70
         required_categories:
           - Intent
           - Behavior
           - Assurance
           - Security
           - Execution
-        require_traceability: true
+        require_traceability: false
         require_governance: false
-  production:
+  local:
     assurance:
-      min_accuracy: 0.95
+      min_accuracy: 0.75
+      max_failures: 5
+    security:
+      sarif:
+        max_critical: 1
+        max_high: 1
+    gate:
+      release:
+        min_primary_score: 60
+        require_traceability: false
+  dev:
+    assurance:
+      min_accuracy: 0.85
+      max_failures: 2
+    gate:
+      release:
+        min_primary_score: 65
+        require_traceability: false
+  test:
+    assurance:
+      min_accuracy: 0.92
+    security:
+      sarif:
+        max_medium: 2
     gate:
       release:
         min_primary_score: 75
         require_traceability: true
+  stage:
+    assurance:
+      min_accuracy: 0.95
+    execution:
+      telemetry:
+        max_age_hours: 168
+    security:
+      sarif:
+        max_medium: 1
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 80
+        require_traceability: true
+  production:
+    assurance:
+      min_accuracy: 0.97
+    execution:
+      telemetry:
+        max_age_hours: 48
+        max_error_rate: 0.02
+        min_adoption_rate: 0.70
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 0
+        max_low: 0
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 85
+        require_traceability: true
         require_governance: true
 ```
 
-`bottleneck validate --env=<environment>` starts from `default` and overlays only the explicitly configured values for the selected environment. Gate, SARIF, and telemetry settings are optional; older configs use safe defaults.
+`bottleneck validate --env=<environment>` starts from `default` and overlays only the explicitly configured values for the selected environment. Gate, SARIF, and telemetry settings are optional; older configs use safe defaults. Generated configs include `local`, `dev`, `test`, `stage`, and `production`; unknown environment names fail with a message that lists supported environments. Local and dev are tuned for fast feedback, test and stage raise assurance and security expectations, and production uses the release gate to block critical readiness gaps.
 
 ### Security
 

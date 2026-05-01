@@ -1,0 +1,29 @@
+{
+  "scenarios_total": 3,
+  "scenarios_passed": 3,
+  "scenarios_failed": 0,
+  "failures": [],
+  "evidence": [
+    {
+      "id": "ASSURANCE-001",
+      "refs": ["BEHAVIOR-001"],
+      "source": "sample Cucumber billing report",
+      "status": "pass",
+      "summary": "Payment method update preserves subscription state and stores only the payment provider token."
+    },
+    {
+      "id": "ASSURANCE-002",
+      "refs": ["BEHAVIOR-002"],
+      "source": "sample Cucumber billing report",
+      "status": "pass",
+      "summary": "Failed invoice retry is triggered once after payment method update."
+    },
+    {
+      "id": "ASSURANCE-003",
+      "refs": ["BEHAVIOR-003"],
+      "source": "sample Cucumber billing report",
+      "status": "pass",
+      "summary": "Repeated invoice retry requests reuse the original idempotency key and do not create duplicate charges."
+    }
+  ]
+}

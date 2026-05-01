@@ -33,11 +33,7 @@ func validateSecurity(rootPath string, cfg config.SecurityConfig, strictValues .
 	path := filepath.Join(rootPath, "security", "guardrails.json")
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return models.ValidationResult{
-			Capability: "Security",
-			Status:     models.StatusFail,
-			Message:    "missing guardrails.json",
-		}
+		return artifactReadErrorResult(rootPath, "Security", "security/guardrails.json", err)
 	}
 
 	var data securityFile

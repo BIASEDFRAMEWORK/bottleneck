@@ -1,6 +1,7 @@
 package validator
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -36,6 +37,11 @@ func TestEngineResultIncludesResolvedEffectiveThresholds(t *testing.T) {
       sarif:
         max_high: 0
         fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 85
+        require_traceability: true
+        require_governance: true
 `,
 	})
 
@@ -56,6 +62,9 @@ func TestEngineResultIncludesResolvedEffectiveThresholds(t *testing.T) {
 	}
 	if thresholds.Execution.Telemetry.MaxAgeHours != 24 {
 		t.Fatalf("expected production telemetry max age override 24, got %d", thresholds.Execution.Telemetry.MaxAgeHours)
+	}
+	if thresholds.Execution.Telemetry.StaleAllowed {
+		t.Fatal("expected production telemetry staleness to be disallowed")
 	}
 	if thresholds.Execution.Telemetry.MinDeploymentsPerWeek != 2 {
 		t.Fatalf("expected inherited telemetry deployment threshold 2, got %.2f", thresholds.Execution.Telemetry.MinDeploymentsPerWeek)
@@ -81,4 +90,76 @@ func TestEngineResultIncludesResolvedEffectiveThresholds(t *testing.T) {
 	if !thresholds.Security.SARIF.FailOnUnknownSeverity {
 		t.Fatal("expected production unknown severity threshold policy")
 	}
+	if thresholds.Gate.Release.MinPrimaryScore != 85 {
+		t.Fatalf("expected production release gate minimum score 85, got %d", thresholds.Gate.Release.MinPrimaryScore)
+	}
+	if !thresholds.Gate.Release.RequireTraceability {
+		t.Fatal("expected production release gate to require traceability")
+	}
+	if !thresholds.Gate.Release.RequireGovernance {
+		t.Fatal("expected production release gate to require governance")
+	}
+}
+
+func TestEngineRejectsUnknownEnvironment(t *testing.T) {
+	basePath := t.TempDir()
+	writeValidationProject(t, basePath, map[string]string{
+		"bottleneck/config.yaml": `environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+  dev:
+    assurance:
+      min_accuracy: 0.85
+`,
+	})
+
+	result := NewEngine(basePath, "not-real").Validate()
+	if result.SystemStatus != "FAIL" || result.PrimaryBottleneck != "Config" {
+		t.Fatalf("expected config failure for unknown environment, got %#v", result)
+	}
+	if len(result.Results) != 1 || result.Results[0].Capability != "Config" {
+		t.Fatalf("expected config validation result, got %#v", result.Results)
+	}
+	if result.Results[0].Message != `unknown environment "not-real" (supported: default, dev)` {
+		t.Fatalf("unexpected unknown environment message: %q", result.Results[0].Message)
+	}
+	for _, substring := range []string{
+		"Next action: choose one of: dev.",
+		"bottleneck scorecard --env=production",
+	} {
+		if !containsDetail(result.Results[0].Details, substring) {
+			t.Fatalf("expected unknown environment guidance %q, got %#v", substring, result.Results[0].Details)
+		}
+	}
+}
+
+func TestEngineMissingConfigIncludesInitializationGuidance(t *testing.T) {
+	result := NewEngine(t.TempDir(), "default").Validate()
+	if result.SystemStatus != "FAIL" || result.PrimaryBottleneck != "Config" {
+		t.Fatalf("expected config failure, got %#v", result)
+	}
+	check := resultForCapability(t, result, "Config")
+	if check.Message != "No Bottleneck config found." {
+		t.Fatalf("expected missing config reason, got %q", check.Message)
+	}
+	for _, substring := range []string{
+		"Bottleneck has not been initialized",
+		"Next action: initialize a SaaS starter project:",
+		"bottleneck init --template saas",
+	} {
+		if !containsDetail(check.Details, substring) {
+			t.Fatalf("expected missing config guidance %q, got %#v", substring, check.Details)
+		}
+	}
+}
+
+func containsDetail(details []string, expected string) bool {
+	for _, detail := range details {
+		if strings.Contains(detail, expected) {
+			return true
+		}
+	}
+	return false
 }

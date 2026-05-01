@@ -101,19 +101,19 @@ func TestCriticalBehaviorWithoutAssuranceWarnsByDefaultAndFailsWhenStrictOrProdu
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	assertFinding(t, defaultGraph.ValidateFindings(), SeverityWarning, "BEHAVIOR-001 is critical but is not linked to assurance evidence")
+	assertFinding(t, defaultGraph.ValidateFindings(), SeverityWarning, "BEHAVIOR-001 has no mapped test evidence")
 
 	strictGraph, err := Build(writeTraceProject(t, files), Options{Environment: "default", Strict: true})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	assertFinding(t, strictGraph.ValidateFindings(), SeverityFail, "BEHAVIOR-001 is critical but is not linked to assurance evidence")
+	assertFinding(t, strictGraph.ValidateFindings(), SeverityFail, "BEHAVIOR-001 has no mapped test evidence")
 
 	productionGraph, err := Build(writeTraceProject(t, files), Options{Environment: "production"})
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	assertFinding(t, productionGraph.ValidateFindings(), SeverityFail, "BEHAVIOR-001 is critical but is not linked to assurance evidence")
+	assertFinding(t, productionGraph.ValidateFindings(), SeverityFail, "BEHAVIOR-001 has no mapped test evidence")
 }
 
 func TestBehaviorWithoutAssuranceReportsTraceabilityGap(t *testing.T) {
@@ -130,7 +130,7 @@ func TestBehaviorWithoutAssuranceReportsTraceabilityGap(t *testing.T) {
 		t.Fatalf("Build returned error: %v", err)
 	}
 
-	assertFinding(t, graph.ValidateFindings(), SeverityWarning, "Traceability Gap: BEHAVIOR-001 exists, but no assurance result references it")
+	assertFinding(t, graph.ValidateFindings(), SeverityWarning, "Traceability Gap: BEHAVIOR-001 has no mapped test evidence")
 }
 
 func TestBehaviorWithOnlyOutboundAssuranceRefStillRequiresScenarioEvidence(t *testing.T) {
@@ -144,7 +144,7 @@ func TestBehaviorWithOnlyOutboundAssuranceRefStillRequiresScenarioEvidence(t *te
 		t.Fatalf("Build returned error: %v", err)
 	}
 
-	assertFinding(t, graph.ValidateFindings(), SeverityWarning, "Traceability Gap: BEHAVIOR-001 exists, but no assurance result references it")
+	assertFinding(t, graph.ValidateFindings(), SeverityWarning, "Traceability Gap: BEHAVIOR-001 has no mapped test evidence")
 }
 
 func TestOrphanedEvidenceIsReported(t *testing.T) {
@@ -265,7 +265,7 @@ func TestTraceIntentShowsRelatedBehaviorAndDownstreamEvidence(t *testing.T) {
 		"Assurance evidence:",
 		"- ASSURANCE-001 found in bottleneck/assurance/results.json",
 		"Missing links:",
-		"BEHAVIOR-002 has no assurance result",
+		"BEHAVIOR-002 has no mapped test evidence",
 	}
 	for _, substring := range expected {
 		if !strings.Contains(output, substring) {
@@ -295,13 +295,13 @@ func TestTraceBehaviorHighlightsMissingLinks(t *testing.T) {
 		"Design evidence:",
 		"- Missing: No design evidence references BEHAVIOR-001.",
 		"Assurance evidence:",
-		"- Missing: No assurance result references BEHAVIOR-001.",
+		"- Missing: No mapped test evidence references BEHAVIOR-001.",
 		"Security evidence:",
 		"- Missing: No security evidence references BEHAVIOR-001.",
 		"Execution evidence:",
 		"- Missing: No telemetry or execution signal references BEHAVIOR-001.",
 		"BEHAVIOR-001 has no design reference",
-		"BEHAVIOR-001 has no assurance result",
+		"BEHAVIOR-001 has no mapped test evidence",
 		"Recommendation:",
 		"Add design, assurance, security, and execution evidence that references BEHAVIOR-001.",
 	}
@@ -334,7 +334,7 @@ func TestTraceFixtureProjectsCoverCompleteAndMissingChains(t *testing.T) {
 		t.Fatalf("Trace missing fixture returned error: %v", err)
 	}
 	output := RenderText(missingTrace)
-	for _, substring := range []string{"BEHAVIOR-001 has no design reference", "BEHAVIOR-001 has no assurance result"} {
+	for _, substring := range []string{"BEHAVIOR-001 has no design reference", "BEHAVIOR-001 has no mapped test evidence"} {
 		if !strings.Contains(output, substring) {
 			t.Fatalf("expected %q in missing fixture trace:\n%s", substring, output)
 		}

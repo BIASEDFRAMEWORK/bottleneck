@@ -1,0 +1,136 @@
+environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+
+    execution:
+      max_error_rate: 0.05
+      min_adoption: 0.5
+      telemetry:
+        max_age_hours: 0
+        min_deployments_per_week: 1
+        max_change_failure_rate: 0.15
+        max_error_rate: 0.05
+        max_user_override_rate: 0.10
+        min_adoption_rate: 0.50
+        max_budget_variance: 0.20
+
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 5
+        max_low: 20
+        fail_on_unknown_severity: false
+
+    gate:
+      release:
+        min_primary_score: 70
+        required_categories:
+          - Intent
+          - Behavior
+          - Assurance
+          - Security
+          - Execution
+        require_traceability: false
+        require_governance: false
+
+  local:
+    assurance:
+      min_accuracy: 0.75
+      max_failures: 5
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 1
+        max_high: 1
+        max_medium: 10
+        max_low: 30
+    gate:
+      release:
+        min_primary_score: 60
+        require_traceability: false
+
+  dev:
+    assurance:
+      min_accuracy: 0.85
+      max_failures: 2
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 1
+        max_medium: 5
+    gate:
+      release:
+        min_primary_score: 65
+        require_traceability: false
+
+  test:
+    assurance:
+      min_accuracy: 0.92
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 0
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 2
+        max_low: 10
+    gate:
+      release:
+        min_primary_score: 75
+        require_traceability: true
+
+  stage:
+    assurance:
+      min_accuracy: 0.95
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 168
+        min_deployments_per_week: 1
+        max_change_failure_rate: 0.12
+        max_error_rate: 0.03
+        min_adoption_rate: 0.60
+    security:
+      sarif:
+        max_critical: 0
+        max_medium: 1
+        max_low: 5
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 80
+        require_traceability: true
+
+  production:
+    assurance:
+      min_accuracy: 0.97
+      max_failures: 0
+    execution:
+      telemetry:
+        max_age_hours: 48
+        min_deployments_per_week: 2
+        max_change_failure_rate: 0.10
+        max_error_rate: 0.02
+        max_user_override_rate: 0.05
+        min_adoption_rate: 0.70
+        max_budget_variance: 0.10
+    security:
+      sarif:
+        max_critical: 0
+        max_high: 0
+        max_medium: 0
+        max_low: 1
+        fail_on_unknown_severity: true
+    gate:
+      release:
+        min_primary_score: 85
+        require_traceability: true
+        require_governance: false

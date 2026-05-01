@@ -17,7 +17,7 @@ var traceID string
 
 var traceCmd = &cobra.Command{
 	Use:   "trace [id]",
-	Short: "Trace evidence links for a framework evidence ID",
+	Short: "Follow one intent, behavior, or evidence ID end-to-end",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		queryID := traceID

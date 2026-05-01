@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"bottleneck/internal/config"
 	"bottleneck/internal/models"
 )
 
@@ -94,6 +95,68 @@ func TestPlaceholderWarningsIdentifyExactFileAndSection(t *testing.T) {
 	for _, detail := range expectedDetails {
 		if !engineResultHasDetail(result, detail) {
 			t.Fatalf("expected detail %q in result: %#v", detail, result.Results)
+		}
+	}
+
+	behavior := resultForCapability(t, result, "Behavior")
+	for _, substring := range []string{
+		"Placeholder content does not support release readiness.",
+		"Next action: replace it with real SaaS evidence or run:",
+		"bottleneck init --template saas",
+	} {
+		if !containsDetail(behavior.Details, substring) {
+			t.Fatalf("expected placeholder guidance %q, got %#v", substring, behavior.Details)
+		}
+	}
+}
+
+func TestMissingEvidenceDirectoryIncludesNextAction(t *testing.T) {
+	basePath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(basePath, "bottleneck"), 0o755); err != nil {
+		t.Fatalf("create bottleneck root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(basePath, "bottleneck", "config.yaml"), []byte(`environments:
+  default:
+    assurance:
+      min_accuracy: 0.90
+      max_failures: 0
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result := NewEngine(basePath, "default").Validate()
+	behavior := resultForCapability(t, result, "Behavior")
+
+	if behavior.Message != "missing behavior-spec.md" {
+		t.Fatalf("expected missing behavior reason, got %q", behavior.Message)
+	}
+	for _, substring := range []string{
+		"Missing evidence directory: bottleneck/behavior",
+		"Expected file: bottleneck/behavior/behavior-spec.md",
+		"Next action: run bottleneck init --template saas or add bottleneck/behavior/behavior-spec.md.",
+	} {
+		if !containsDetail(behavior.Details, substring) {
+			t.Fatalf("expected missing directory guidance %q, got %#v", substring, behavior.Details)
+		}
+	}
+}
+
+func TestMissingAssuranceIncludesIngestSuggestion(t *testing.T) {
+	rootPath := filepath.Join(t.TempDir(), "bottleneck")
+
+	result := validateAssurance(rootPath, config.AssuranceConfig{})
+
+	if result.Message != "No assurance evidence found." {
+		t.Fatalf("expected missing assurance reason, got %q", result.Message)
+	}
+	for _, substring := range []string{
+		"Missing evidence directory: bottleneck/assurance",
+		"Expected file: bottleneck/assurance/results.json",
+		"Next action: Add test evidence manually or run:",
+		"bottleneck ingest cucumber --file reports/cucumber.json",
+	} {
+		if !containsDetail(result.Details, substring) {
+			t.Fatalf("expected assurance guidance %q, got %#v", substring, result.Details)
 		}
 	}
 }
@@ -252,6 +315,10 @@ func writeValidationProject(t *testing.T, basePath string, overrides map[string]
     execution:
       max_error_rate: 0.05
       min_adoption: 0.5
+  production:
+    gate:
+      release:
+        require_traceability: true
 `,
 		"bottleneck/behavior/behavior-spec.md": validBehavior,
 		"bottleneck/intent/intent.md":          validIntent,

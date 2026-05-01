@@ -1,0 +1,22 @@
+{
+  "scenarios_total": 2,
+  "scenarios_passed": 2,
+  "scenarios_failed": 0,
+  "failures": [],
+  "evidence": [
+    {
+      "id": "ASSURANCE-001",
+      "refs": ["BEHAVIOR-001"],
+      "source": "manual billing test summary",
+      "status": "pass",
+      "summary": "Payment method update preserves subscription state and stores only the payment provider token."
+    },
+    {
+      "id": "ASSURANCE-002",
+      "refs": ["BEHAVIOR-002"],
+      "source": "manual billing test summary",
+      "status": "pass",
+      "summary": "Failed invoice retry is triggered once after payment method update."
+    }
+  ]
+}

@@ -26,11 +26,7 @@ func validateBehavior(rootPath string, strict bool) models.ValidationResult {
 
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return models.ValidationResult{
-			Capability: "Behavior",
-			Status:     models.StatusFail,
-			Message:    "missing behavior-spec.md",
-		}
+		return artifactReadErrorResult(rootPath, "Behavior", "behavior/behavior-spec.md", err)
 	}
 
 	text := strings.TrimSpace(string(content))

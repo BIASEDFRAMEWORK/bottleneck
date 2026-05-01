@@ -21,7 +21,10 @@ const (
 	DefaultExecutionOutput = "bottleneck/execution/telemetry.json"
 )
 
-var behaviorIDPattern = regexp.MustCompile(`@?(BEHAVIOR-[0-9]{3,})`)
+var (
+	behaviorIDPattern = regexp.MustCompile(`@?(BEHAVIOR-[0-9]{3,})`)
+	evidenceIDPattern = regexp.MustCompile(`\b(?:INTENT|BEHAVIOR|DESIGN|ASSURANCE|SECURITY|EXECUTION)-[0-9]{3,}\b`)
+)
 
 type EvidenceItem struct {
 	ID         string   `json:"id,omitempty"`
@@ -148,12 +151,12 @@ func (s IngestSummary) Text() string {
 func IngestCucumber(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return IngestSummary{}, fmt.Errorf("read cucumber file: %w", err)
+		return IngestSummary{}, ingestInputError("cucumber", filePath, "read cucumber file", err)
 	}
 
 	var report cucumberReport
 	if err := json.Unmarshal(content, &report); err != nil {
-		return IngestSummary{}, fmt.Errorf("parse cucumber json: %w", err)
+		return IngestSummary{}, ingestInputError("cucumber", filePath, "parse cucumber json", err)
 	}
 
 	artifact, warnings := normalizeCucumber(report, filePath)
@@ -182,15 +185,34 @@ func IngestCodeQL(rootPath, filePath, outPath string, merge, dryRun bool) (Inges
 	return IngestSARIF(rootPath, filePath, outPath, merge, dryRun)
 }
 
+func ingestInputError(kind string, filePath string, action string, err error) error {
+	return fmt.Errorf("%s %s: %w\nNext action: check the expected sample format in %s.", action, filePath, err, sampleFormatPath(kind))
+}
+
+func sampleFormatPath(kind string) string {
+	switch kind {
+	case "cucumber":
+		return "examples/saas/reports/cucumber.json"
+	case "sarif":
+		return "examples/saas/reports/codeql.sarif"
+	case "test-summary":
+		return "examples/saas/reports/test-summary.json"
+	case "telemetry":
+		return "examples/saas/reports/telemetry.json"
+	default:
+		return "examples/saas/reports/"
+	}
+}
+
 func IngestSARIF(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return IngestSummary{}, fmt.Errorf("read sarif file: %w", err)
+		return IngestSummary{}, ingestInputError("sarif", filePath, "read sarif file", err)
 	}
 
 	var sarif sarifReport
 	if err := json.Unmarshal(content, &sarif); err != nil {
-		return IngestSummary{}, fmt.Errorf("parse sarif json: %w", err)
+		return IngestSummary{}, ingestInputError("sarif", filePath, "parse sarif json", err)
 	}
 
 	artifact := normalizeSARIF(sarif, filePath)
@@ -217,12 +239,12 @@ func IngestSARIF(rootPath, filePath, outPath string, merge, dryRun bool) (Ingest
 func IngestTestSummary(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return IngestSummary{}, fmt.Errorf("read test summary file: %w", err)
+		return IngestSummary{}, ingestInputError("test-summary", filePath, "read test summary file", err)
 	}
 
 	var input TestSummaryInput
 	if err := json.Unmarshal(content, &input); err != nil {
-		return IngestSummary{}, fmt.Errorf("parse test summary json: %w", err)
+		return IngestSummary{}, ingestInputError("test-summary", filePath, "parse test summary json", err)
 	}
 
 	artifact, err := normalizeTestSummary(input, filePath)
@@ -252,12 +274,12 @@ func IngestTestSummary(rootPath, filePath, outPath string, merge, dryRun bool) (
 func IngestTelemetry(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return IngestSummary{}, fmt.Errorf("read telemetry file: %w", err)
+		return IngestSummary{}, ingestInputError("telemetry", filePath, "read telemetry file", err)
 	}
 
 	var input ExecutionArtifact
 	if err := json.Unmarshal(content, &input); err != nil {
-		return IngestSummary{}, fmt.Errorf("parse telemetry json: %w", err)
+		return IngestSummary{}, ingestInputError("telemetry", filePath, "parse telemetry json", err)
 	}
 
 	normalizeTelemetryRates(&input)
@@ -537,11 +559,13 @@ func normalizeSARIF(report sarifReport, source string) SecurityArtifact {
 			if message == "" {
 				message = result.RuleID
 			}
+			refs := extractSARIFRefs(result.Properties, rule.Properties)
 
 			evidence = append(evidence, EvidenceItem{
 				ID:         fmt.Sprintf("SECURITY-%03d", len(evidence)+1),
 				Type:       "sarif",
 				Source:     source,
+				Refs:       refs,
 				Severity:   severity,
 				RuleID:     result.RuleID,
 				RuleName:   rule.Name,
@@ -683,6 +707,52 @@ func extractStringProperty(properties map[string]interface{}, key string) string
 		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
 	return ""
+}
+
+func extractSARIFRefs(propertySets ...map[string]interface{}) []string {
+	var refs []string
+	keys := []string{
+		"refs",
+		"ref",
+		"references",
+		"bottleneck.refs",
+		"bottleneckRefs",
+		"evidence_refs",
+		"evidenceRefs",
+		"behavior_refs",
+		"behaviorRefs",
+		"tags",
+	}
+	for _, properties := range propertySets {
+		if properties == nil {
+			continue
+		}
+		for _, key := range keys {
+			refs = append(refs, extractEvidenceRefsFromValue(properties[key])...)
+		}
+	}
+	return uniqueStrings(refs)
+}
+
+func extractEvidenceRefsFromValue(value interface{}) []string {
+	switch v := value.(type) {
+	case string:
+		return evidenceIDPattern.FindAllString(v, -1)
+	case []interface{}:
+		var refs []string
+		for _, item := range v {
+			refs = append(refs, extractEvidenceRefsFromValue(item)...)
+		}
+		return refs
+	case []string:
+		var refs []string
+		for _, item := range v {
+			refs = append(refs, evidenceIDPattern.FindAllString(item, -1)...)
+		}
+		return refs
+	default:
+		return nil
+	}
 }
 
 func normalizeSeverity(value string) string {

@@ -266,6 +266,76 @@ func TestRenderJSONProducesValidJSON(t *testing.T) {
 	}
 }
 
+func TestScorecardJSONIncludesSchemaVersion(t *testing.T) {
+	decoded := renderStableScorecardJSON(t, sampleWarningResult())
+	if decoded.SchemaVersion != SchemaVersion {
+		t.Fatalf("expected schema version %q, got %q", SchemaVersion, decoded.SchemaVersion)
+	}
+}
+
+func TestScorecardJSONIncludesEnvironment(t *testing.T) {
+	decoded := renderStableScorecardJSON(t, sampleWarningResult())
+	if decoded.Environment != "production" {
+		t.Fatalf("expected environment production, got %q", decoded.Environment)
+	}
+}
+
+func TestScorecardJSONIncludesPrimaryBottleneck(t *testing.T) {
+	decoded := renderStableScorecardJSON(t, sampleWarningResult())
+	if decoded.PrimaryBottleneck != "Behavior" {
+		t.Fatalf("expected primary bottleneck Behavior, got %q", decoded.PrimaryBottleneck)
+	}
+	if decoded.SystemStatus != StatusWarn || decoded.ReleaseRecommendation != RecommendationConditional {
+		t.Fatalf("expected status and recommendation in stable contract, got %#v", decoded)
+	}
+}
+
+func TestScorecardJSONIncludesCategories(t *testing.T) {
+	decoded := renderStableScorecardJSON(t, sampleSaaSDayOneResult())
+	if len(decoded.Categories) != 7 {
+		t.Fatalf("expected stable category objects, got %#v", decoded.Categories)
+	}
+	expectedOrder := []string{"Intent", "Behavior", "Design", "Assurance", "Security", "Execution", "Traceability"}
+	for index, expected := range expectedOrder {
+		if decoded.Categories[index].Name != expected {
+			t.Fatalf("expected category %d to be %s, got %#v", index, expected, decoded.Categories)
+		}
+	}
+}
+
+func TestScorecardJSONCategoryFields(t *testing.T) {
+	missing := "Add behavior examples for failed payment retries."
+	recommendation := "Replace placeholder behavior text with concrete expected and unacceptable behavior."
+	result := models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      models.StatusWarning,
+		PrimaryBottleneck: "Behavior",
+		Results: []models.ValidationResult{{
+			Capability: "Behavior",
+			Status:     models.StatusWarning,
+			Details:    []string{"behavior evidence exists"},
+			EvidenceQuality: models.EvidenceQuality{
+				Missing: []string{missing},
+			},
+		}},
+	}
+
+	decoded := renderStableScorecardJSON(t, result)
+	if len(decoded.Categories) != 1 {
+		t.Fatalf("expected one category, got %#v", decoded.Categories)
+	}
+	category := decoded.Categories[0]
+	if category.Name != "Behavior" ||
+		category.Status != StatusWarn ||
+		category.Score == 0 ||
+		strings.TrimSpace(category.Summary) == "" ||
+		!containsString(category.EvidenceFound, "behavior evidence exists") ||
+		!containsString(category.EvidenceMissing, missing) ||
+		!containsString(category.Recommendations, recommendation) {
+		t.Fatalf("stable category contract missing required fields: %#v", category)
+	}
+}
+
 func TestRenderSurfacesContentQualityDetailsInTextAndJSON(t *testing.T) {
 	detail := `bottleneck/intent/intent.md section "Outcomes" still contains placeholder content`
 	result := models.EngineResult{
@@ -827,6 +897,27 @@ func sampleThresholds() models.EffectiveThresholds {
 			},
 		},
 	}
+}
+
+func renderStableScorecardJSON(t *testing.T, result models.EngineResult) Scorecard {
+	t.Helper()
+	output, err := Render(result, "json")
+	if err != nil {
+		t.Fatalf("Render json returned error: %v", err)
+	}
+	var decoded Scorecard
+	if err := json.Unmarshal([]byte(output), &decoded); err != nil {
+		t.Fatalf("scorecard JSON did not parse: %v\n%s", err, output)
+	}
+	stable := StableJSONScorecard(decoded)
+	if stable.SchemaVersion == "" ||
+		stable.Environment == "" ||
+		stable.SystemStatus == "" ||
+		stable.ReleaseRecommendation == "" ||
+		stable.PrimaryBottleneck == "" {
+		t.Fatalf("stable scorecard contract missing required top-level fields: %#v", stable)
+	}
+	return decoded
 }
 
 func containsString(values []string, expected string) bool {

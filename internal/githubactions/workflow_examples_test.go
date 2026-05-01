@@ -146,3 +146,86 @@ func TestSaaSScorecardWorkflowReferencesValidCommands(t *testing.T) {
 		t.Fatal("workflow emits diagnose --format=github but diagnose help does not advertise github format support")
 	}
 }
+
+func TestEvidenceReportWorkflowGeneratesAndUploadsArtifacts(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "github-actions", "bottleneck-evidence-report.yml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read evidence report workflow example: %v", err)
+	}
+	text := string(content)
+
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("evidence report workflow YAML should parse: %v\n%s", err, text)
+	}
+
+	expected := []string{
+		"name: Bottleneck Evidence Report",
+		"pull_request:",
+		"workflow_dispatch:",
+		"actions/checkout@v4",
+		"actions/setup-go@v5",
+		"go-version-file: go.mod",
+		"go build -o bottleneck-cli .",
+		"./bottleneck-cli validate",
+		"./bottleneck-cli scorecard --format=markdown --details",
+		"./bottleneck-cli snapshot --label=ci",
+		"./bottleneck-cli trends --format=markdown --out=bottleneck/reports/trend-summary.md",
+		"./bottleneck-cli report --format=markdown --out=bottleneck/reports/sdlc-evidence-report.md",
+		"actions/upload-artifact@v4",
+		"name: bottleneck-reports",
+		"bottleneck/history/",
+		"bottleneck/reports/",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(text, substring) {
+			t.Fatalf("expected evidence report workflow to contain %q:\n%s", substring, text)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"git commit",
+		"secrets.",
+		"/Users/",
+		"/tmp/",
+		"/private/",
+		"~/",
+		"actions/github-script",
+		"pull-requests: write",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("evidence report workflow should not contain %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestEvidenceReportWorkflowReferencesValidCommands(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "github-actions", "bottleneck-evidence-report.yml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read evidence report workflow example: %v", err)
+	}
+	text := string(content)
+
+	commands := map[string]string{
+		"validate":  "validate.go",
+		"scorecard": "scorecard.go",
+		"snapshot":  "snapshot.go",
+		"trends":    "trends.go",
+		"report":    "report.go",
+	}
+	for command, file := range commands {
+		if !strings.Contains(text, "bottleneck-cli "+command) {
+			t.Fatalf("expected evidence report workflow to reference bottleneck %s:\n%s", command, text)
+		}
+		commandPath := filepath.Join("..", "..", "cmd", file)
+		source, err := os.ReadFile(commandPath)
+		if err != nil {
+			t.Fatalf("read command source %s: %v", file, err)
+		}
+		if !strings.Contains(string(source), `Use:   "`+command+`"`) {
+			t.Fatalf("expected cmd/%s to register %q command", file, command)
+		}
+	}
+}

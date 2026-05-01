@@ -283,3 +283,202 @@ func TestRenderUsesEvidenceDrivenSectionsAndAvoidsGenericDescriptions(t *testing
 		t.Fatalf("explain output should avoid generic framework descriptions:\n%s", output)
 	}
 }
+
+func TestExplainIncludesEvidenceFoundMissingRiskRecommendationsOwnersAndAutomation(t *testing.T) {
+	result := models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      models.StatusWarning,
+		PrimaryBottleneck: "Assurance",
+		Results: []models.ValidationResult{{
+			Capability: "Assurance",
+			Status:     models.StatusWarning,
+			Message:    "BEHAVIOR-003 has no mapped test evidence",
+			Details: []string{
+				"accuracy: 1.00 (threshold: 0.90)",
+				"bottleneck/behavior/behavior-spec.md BEHAVIOR-003 has no mapped test evidence",
+			},
+		}},
+	}
+
+	output, err := Render(result, "")
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+
+	expected := []string{
+		"Bottleneck Explanation",
+		"Why this matters:",
+		"Evidence found:",
+		"accuracy: 1.00 (threshold: 0.90)",
+		"Evidence missing:",
+		"Tests exist but are not linked to behavior IDs.",
+		"Risk to delivery:",
+		"The team may ship functionality that appears complete but cannot be proven against intended behavior.",
+		"Recommended actions:",
+		"Add traceability references from test evidence to behavior expectations.",
+		"Suggested owner roles:",
+		"QA/Assurance Engineer",
+		"Suggested automation:",
+		"Run Cucumber or equivalent behavior tests in GitHub Actions.",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+}
+
+func TestExplainMarkdownOutput(t *testing.T) {
+	report, err := BuildReport(singleCategoryResult("Security", models.StatusFail, "high severity finding exists"), nil, "security")
+	if err != nil {
+		t.Fatalf("BuildReport returned error: %v", err)
+	}
+	output, err := RenderReport(report, FormatMarkdown)
+	if err != nil {
+		t.Fatalf("RenderReport returned error: %v", err)
+	}
+	expected := []string{
+		"# Bottleneck Explanation",
+		"## Security",
+		"### Why This Matters",
+		"### Evidence Found",
+		"### Evidence Missing",
+		"### Risk To Delivery",
+		"### Recommended Actions",
+		"### Suggested Owner Roles",
+		"### Suggested Automation",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in markdown output:\n%s", substring, output)
+		}
+	}
+}
+
+func TestExplainJSONOutput(t *testing.T) {
+	report, err := BuildReport(singleCategoryResult("Execution", models.StatusWarning, "adoption below threshold"), nil, "execution")
+	if err != nil {
+		t.Fatalf("BuildReport returned error: %v", err)
+	}
+	output, err := RenderReport(report, FormatJSON)
+	if err != nil {
+		t.Fatalf("RenderReport returned error: %v", err)
+	}
+	if !strings.Contains(output, `"schema_version": "explain.v2"`) ||
+		!strings.Contains(output, `"risk_to_delivery"`) ||
+		!strings.Contains(output, `"suggested_automations"`) {
+		t.Fatalf("expected structured explain JSON, got:\n%s", output)
+	}
+}
+
+func TestExplainIntentRules(t *testing.T) {
+	output := renderRuleOutput(t, "Intent", "intent evidence has placeholder content and lacks measurable outcomes")
+	expected := []string{
+		"Intent exists but does not clearly define measurable outcomes.",
+		"Intent contains placeholder or thin content.",
+		"Add observable outcomes, business constraints, and unacceptable outcomes.",
+		"Replace template text with product-specific intent.",
+		"Product Lead",
+		"PR template requiring an intent reference",
+	}
+	assertExplainContains(t, output, expected)
+}
+
+func TestExplainBehaviorRules(t *testing.T) {
+	output := renderRuleOutput(t, "Behavior", "behavior spec has no BEHAVIOR-* IDs and no mapped test evidence")
+	expected := []string{
+		"Behavior expectations are not traceable.",
+		"Behavior is not validated.",
+		"Add stable behavior IDs such as BEHAVIOR-001.",
+		"Map each critical behavior to test evidence.",
+		"QA/Assurance Engineer",
+		"behavior specification linting",
+	}
+	assertExplainContains(t, output, expected)
+}
+
+func TestExplainDesignRules(t *testing.T) {
+	output := renderRuleOutput(t, "Design", "architecture is missing tradeoffs and failure modes")
+	expected := []string{
+		"Architecture exists but does not explain tradeoffs.",
+		"Architecture does not describe failure modes.",
+		"Add decision records for key constraints and design choices.",
+		"Add fallback, monitoring, and operational assumptions.",
+		"Architect",
+		"architecture decision record check",
+	}
+	assertExplainContains(t, output, expected)
+}
+
+func TestExplainAssuranceRules(t *testing.T) {
+	output := renderRuleOutput(t, "Assurance", "missing assurance evidence, no mapped test evidence, and critical behavior validation coverage is low")
+	expected := []string{
+		"Missing automated validation evidence.",
+		"Tests exist but are not linked to behavior IDs.",
+		"Critical behaviors lack validation.",
+		"Add test output or BDD evidence under bottleneck/assurance/.",
+		"Prioritize tests for high-risk behaviors before expanding feature scope.",
+		"Ingest test results",
+	}
+	assertExplainContains(t, output, expected)
+}
+
+func TestExplainSecurityRules(t *testing.T) {
+	output := renderRuleOutput(t, "Security", "missing security guardrails and high severity security finding")
+	expected := []string{
+		"Missing security evidence.",
+		"Security guardrails are not documented.",
+		"High severity security findings exist.",
+		"Add CodeQL, dependency review, secret scanning, or SARIF evidence.",
+		"Block release until findings are triaged or resolved.",
+		"Security Engineer",
+		"CodeQL",
+	}
+	assertExplainContains(t, output, expected)
+}
+
+func TestExplainExecutionRules(t *testing.T) {
+	output := renderRuleOutput(t, "Execution", "missing telemetry, weak adoption, user override, error rate, and latency are above threshold")
+	expected := []string{
+		"Missing execution evidence.",
+		"Execution evidence suggests weak adoption or user trust.",
+		"Execution evidence suggests operational instability.",
+		"Add telemetry or production-readiness evidence.",
+		"Review user workflow, training, and feedback loops.",
+		"Address error rate, latency, or incident signals before accelerating release.",
+		"SRE/Operations",
+		"Ingest telemetry JSON",
+	}
+	assertExplainContains(t, output, expected)
+}
+
+func singleCategoryResult(category string, status string, message string) models.EngineResult {
+	return models.EngineResult{
+		Environment:       "default",
+		SystemStatus:      status,
+		PrimaryBottleneck: category,
+		Results: []models.ValidationResult{{
+			Capability: category,
+			Status:     status,
+			Message:    message,
+		}},
+	}
+}
+
+func renderRuleOutput(t *testing.T, category string, message string) string {
+	t.Helper()
+	output, err := Render(singleCategoryResult(category, models.StatusWarning, message), category)
+	if err != nil {
+		t.Fatalf("Render returned error: %v", err)
+	}
+	return output
+}
+
+func assertExplainContains(t *testing.T, output string, expected []string) {
+	t.Helper()
+	for _, substring := range expected {
+		if !strings.Contains(output, substring) {
+			t.Fatalf("expected %q in output:\n%s", substring, output)
+		}
+	}
+}

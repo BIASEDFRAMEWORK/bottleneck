@@ -103,6 +103,8 @@ Add assurance evidence for payment retry behavior.
 
 For the full walkthrough, including how to break and fix the evidence gap, see [docs/quickstart-saas.md](docs/quickstart-saas.md).
 
+For enterprise usage with snapshots, trends, reports, CI artifacts, and Git-backed evidence history, see [docs/enterprise-sdlc-evidence.md](docs/enterprise-sdlc-evidence.md).
+
 For a copyable demo project with the intentional `BEHAVIOR-003` assurance gap, sample reports, and GitHub Actions workflow, see [examples/saas-billing](examples/saas-billing).
 
 Sample SaaS report files live in `examples/saas/reports/` so you can try ingestion immediately:
@@ -323,17 +325,26 @@ Examples:
 bottleneck explain
 bottleneck explain --env=production
 bottleneck explain --env=production --capability=Assurance
+bottleneck explain --category=assurance
+bottleneck explain --format=markdown
+bottleneck explain --format=json
+bottleneck explain --category=assurance --format=markdown --out=bottleneck/reports/bottleneck-explanation.md
 ```
 
 The command reuses the validation engine and adds:
 
 - primary diagnosis when no capability filter is used
 - owner mapping
+- suggested owner roles
 - mapped bottlenecks
 - why-this-matters explanation
 - evidence/details
 - evidence-quality score, missing evidence, and score impacts
-- one recommended next action
+- risk to delivery
+- deterministic recommended actions
+- suggested GitHub Actions and automation hooks
+
+Supported formats are `text`, `markdown`, and `json`. The explanation is rule-based and local-only; it does not call an LLM or external service.
 
 ### `bottleneck diagnose`
 
@@ -376,6 +387,8 @@ Supported formats:
 - `json`
 - `markdown`
 
+The JSON output is the stable integration contract for snapshots, trends, reports, CI, and future tooling. It includes `schema_version`, `environment`, `system_status`, `release_recommendation`, `primary_bottleneck`, and a deterministic `categories` array. Each category includes `name`, `status`, `score`, `summary`, `evidence_found`, `evidence_missing`, and `recommendations`. Existing integration fields such as `capabilities`, `diagnosis`, and `effective_thresholds` remain present for backwards compatibility.
+
 Supported views:
 
 - `executive`: short release decision summary
@@ -394,6 +407,83 @@ Like `validate`, `scorecard` returns a non-zero exit code when the system is fai
 Diagnosis scoring is derived from validation output. Passing BIASED categories start high, warnings score in the middle, failures score low, and missing, placeholder-heavy, thin, vague, unmeasurable, or disconnected evidence reduces the score further. Missing expected evidence IDs and broken traceability refs are included in score impacts. The primary bottleneck is the weakest BIASED category using this tie priority: Assurance, Security, Behavior, Intent, Execution, Design. When all assessed BIASED categories are strong, the primary bottleneck is `None`.
 
 When `--github-annotations` is used, `validate` and `scorecard` emit GitHub Actions workflow commands for warning and failing validation results. Failing results are emitted as `::error`; warning results are emitted as `::warning`. File paths are included when bottleneck can tie a finding to an artifact.
+
+### `bottleneck snapshot`
+
+Writes the current scorecard as a local JSON snapshot under `bottleneck/history/scorecards/` and updates `bottleneck/history/latest/<env>.json` for trend history. Snapshots are local files that can be committed to Git; no database, backend, or external service is required.
+
+Examples:
+
+```sh
+bottleneck snapshot
+bottleneck snapshot --env=production
+bottleneck snapshot --label=release-candidate
+bottleneck snapshot --out=bottleneck/history/scorecards
+bottleneck snapshot --strict
+bottleneck snapshot --no-latest
+```
+
+Snapshot filenames use UTC timestamps:
+
+```text
+bottleneck/history/scorecards/2026-05-01T141500Z-default-scorecard.json
+bottleneck/history/scorecards/2026-05-01T141500Z-production-release-candidate-scorecard.json
+```
+
+`snapshot` still exits zero when it successfully writes a failing scorecard snapshot, because failed evidence is useful history. It exits non-zero for runtime problems such as missing or invalid Bottleneck config, invalid flags, or write failures.
+
+### `bottleneck trends`
+
+Reads local scorecard snapshots from `bottleneck/history/scorecards/` and summarizes whether SDLC evidence is improving, declining, stable, recovered, regressed, or still lacks enough history. Trends use Git-committable local JSON files only; no database, dashboard, backend, or external service is required.
+
+Examples:
+
+```sh
+bottleneck trends
+bottleneck trends --env=production
+bottleneck trends --window=6
+bottleneck trends --format=text
+bottleneck trends --format=markdown
+bottleneck trends --format=json
+bottleneck trends --format=markdown --out=bottleneck/reports/trend-summary.md
+```
+
+`trends` filters snapshots by environment, sorts by `snapshot.created_at`, analyzes the latest window, identifies category direction and persistent primary bottlenecks, and renders a leadership summary. If history is missing or only one snapshot exists, it reports insufficient history and recommends creating snapshots over multiple delivery cycles.
+
+### `bottleneck seed-history`
+
+Creates deterministic demo scorecard snapshots under `bottleneck/history/scorecards/` so teams can try trends and leadership reports without waiting for multiple delivery cycles. The default scenario is `saas-day-one`, which shows a SaaS delivery system moving from weak intent and behavior evidence to a stable release candidate.
+
+Examples:
+
+```sh
+bottleneck seed-history
+bottleneck seed-history --scenario=saas-day-one
+bottleneck seed-history --env=production
+bottleneck seed-history --snapshots=6
+bottleneck seed-history --out=bottleneck/history/scorecards
+bottleneck seed-history --overwrite
+```
+
+Seeded snapshots use the same `scorecard.snapshot.v1` wrapper and `scorecard.v2` scorecard payload as `bottleneck snapshot`, including category scores and primary bottleneck metadata that `bottleneck trends` and `bottleneck report` can read. Existing files in the output directory are not overwritten unless `--overwrite` is provided.
+
+### `bottleneck report`
+
+Generates a leadership-ready SDLC evidence report from local evidence, the current scorecard, local snapshot trends, and deterministic explanation data. The default command writes Markdown to `bottleneck/reports/sdlc-evidence-report.md` and prints a short summary.
+
+Examples:
+
+```sh
+bottleneck report
+bottleneck report --env=production
+bottleneck report --window=6
+bottleneck report --strict
+bottleneck report --format=markdown
+bottleneck report --format=json
+bottleneck report --out=bottleneck/reports/custom-sdlc-report.md
+```
+
+The report includes executive summary, current status, primary bottleneck, category scorecard, trend summary, evidence found and missing, delivery risks, recommended actions, suggested owners, suggested automation, leadership decision needed, and snapshot metadata. Missing trend history is handled as insufficient history and does not block report generation.
 
 ### `bottleneck trace`
 
@@ -421,11 +511,21 @@ Positional IDs such as `bottleneck trace BEHAVIOR-001` remain supported.
 Copyable workflow examples live in `examples/github-actions/`:
 
 - `bottleneck-saas-scorecard.yml`: Day-One SaaS workflow that validates evidence, writes a Markdown scorecard to the GitHub Actions step summary, emits annotations, and uses the release gate as the blocking check
+- `bottleneck-evidence-report.yml`: enterprise evidence workflow that validates evidence, creates a CI snapshot, generates trend and SDLC evidence reports, and uploads history and report artifacts
 - `bottleneck-validate.yml`: runs `bottleneck validate`
 - `bottleneck-scorecard.yml`: writes a Markdown scorecard to GitHub Actions Step Summary
 - `bottleneck-pr-gate.yml`: runs validation, writes Step Summary output, emits annotations, and updates a stable PR comment
 
 Copy the workflow you want into `.github/workflows/` in the repository that owns the evidence artifacts.
+
+For the enterprise evidence report workflow:
+
+```sh
+mkdir -p .github/workflows
+cp examples/github-actions/bottleneck-evidence-report.yml .github/workflows/bottleneck-evidence-report.yml
+```
+
+The CI workflow generates a snapshot and report for the current run and uploads `bottleneck/history/` and `bottleneck/reports/` as artifacts. It does not commit those files automatically. If your team wants Git to be the long-term trend history, review and commit snapshot files intentionally. CI-generated reports are useful for PR and release review, but committed snapshots are needed for long-lived trend history across runs unless artifacts are retained.
 
 For the SaaS Day-One workflow:
 

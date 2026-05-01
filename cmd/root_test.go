@@ -26,6 +26,10 @@ func TestRootCommandProductLanguageMatchesRoadmap(t *testing.T) {
 		"diagnose    Explain what is blocking delivery and what to inspect next.",
 		"trace       Follow one intent, behavior, or evidence ID end-to-end.",
 		"ingest      Convert test, security, and telemetry reports into Bottleneck evidence.",
+		"snapshot    Write scorecard snapshots for local trend history.",
+		"seed-history Create demo scorecard history for local trends.",
+		"trends      Analyze scorecard trends from local snapshots.",
+		"report      Generate a leadership-ready SDLC evidence report.",
 		"explain     Show how evidence affected category scores.",
 		"main terminal surface",
 	}
@@ -59,6 +63,10 @@ func TestRootHelpShowsDayOnePathAndCommonCommands(t *testing.T) {
 		"diagnose    Explain what is blocking delivery and what to inspect next.",
 		"trace       Follow one intent, behavior, or evidence ID end-to-end.",
 		"ingest      Convert test, security, and telemetry reports into Bottleneck evidence.",
+		"snapshot    Write scorecard snapshots for local trend history.",
+		"seed-history Create demo scorecard history for local trends.",
+		"trends      Analyze scorecard trends from local snapshots.",
+		"report      Generate a leadership-ready SDLC evidence report.",
 		"explain     Show how evidence affected category scores.",
 	}
 	for _, substring := range expected {

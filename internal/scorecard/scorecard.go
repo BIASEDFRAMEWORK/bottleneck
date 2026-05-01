@@ -3,6 +3,7 @@ package scorecard
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"bottleneck/internal/diagnosis"
@@ -43,8 +44,28 @@ type Scorecard struct {
 	Diagnosis             diagnosis.Diagnosis        `json:"diagnosis"`
 	GitHub                *githubactions.Metadata    `json:"github,omitempty"`
 	PullRequestRisk       []prrisk.Signal            `json:"pull_request_risk,omitempty"`
+	Categories            []JSONCategory             `json:"categories"`
 	Capabilities          []CapabilityScorecard      `json:"capabilities"`
 	BottomLine            string                     `json:"bottom_line"`
+}
+
+type JSONScorecard struct {
+	SchemaVersion         string         `json:"schema_version"`
+	Environment           string         `json:"environment"`
+	SystemStatus          string         `json:"system_status"`
+	ReleaseRecommendation string         `json:"release_recommendation"`
+	PrimaryBottleneck     string         `json:"primary_bottleneck"`
+	Categories            []JSONCategory `json:"categories"`
+}
+
+type JSONCategory struct {
+	Name            string   `json:"name"`
+	Status          string   `json:"status"`
+	Score           int      `json:"score"`
+	Summary         string   `json:"summary"`
+	EvidenceFound   []string `json:"evidence_found"`
+	EvidenceMissing []string `json:"evidence_missing"`
+	Recommendations []string `json:"recommendations"`
 }
 
 type CapabilityScorecard struct {
@@ -174,8 +195,31 @@ func BuildWithOptions(result models.EngineResult, options Options) Scorecard {
 		card.PullRequestRisk = prrisk.Assess(metadata)
 	}
 	card.BottomLine = bottomLine(card)
+	card = EnsureStableContract(card)
 
 	return card
+}
+
+func EnsureStableContract(card Scorecard) Scorecard {
+	if strings.TrimSpace(card.SchemaVersion) == "" {
+		card.SchemaVersion = SchemaVersion
+	}
+	if card.Categories == nil {
+		card.Categories = jsonCategoriesFromCapabilities(card.Capabilities)
+	}
+	return card
+}
+
+func StableJSONScorecard(card Scorecard) JSONScorecard {
+	card = EnsureStableContract(card)
+	return JSONScorecard{
+		SchemaVersion:         card.SchemaVersion,
+		Environment:           card.Environment,
+		SystemStatus:          card.SystemStatus,
+		ReleaseRecommendation: card.ReleaseRecommendation,
+		PrimaryBottleneck:     card.PrimaryBottleneck,
+		Categories:            card.Categories,
+	}
 }
 
 func Render(result models.EngineResult, format string, viewValues ...string) (string, error) {
@@ -225,6 +269,69 @@ func buildCapability(validation models.ValidationResult, score int) CapabilitySc
 		RecommendedAction: recommendedActionFor(validation, meta),
 		Evidence:          evidence,
 	}
+}
+
+func jsonCategoriesFromCapabilities(capabilities []CapabilityScorecard) []JSONCategory {
+	byName := map[string]CapabilityScorecard{}
+	seen := map[string]struct{}{}
+	for _, capability := range capabilities {
+		name := strings.TrimSpace(capability.Capability)
+		if name == "" {
+			continue
+		}
+		if _, exists := byName[name]; !exists {
+			byName[name] = capability
+			seen[name] = struct{}{}
+		}
+	}
+
+	orderedNames := make([]string, 0, len(byName))
+	for _, name := range stableCategoryOrder() {
+		if _, exists := seen[name]; exists {
+			orderedNames = append(orderedNames, name)
+			delete(seen, name)
+		}
+	}
+	extraNames := make([]string, 0, len(seen))
+	for name := range seen {
+		extraNames = append(extraNames, name)
+	}
+	sort.Strings(extraNames)
+	orderedNames = append(orderedNames, extraNames...)
+
+	categories := make([]JSONCategory, 0, len(orderedNames))
+	for _, name := range orderedNames {
+		capability := byName[name]
+		categories = append(categories, JSONCategory{
+			Name:            name,
+			Status:          capability.Status,
+			Score:           capability.Score,
+			Summary:         capability.Reason,
+			EvidenceFound:   stableStringList(capability.Evidence),
+			EvidenceMissing: stableStringList(capability.MissingEvidence),
+			Recommendations: recommendationList(capability.RecommendedAction),
+		})
+	}
+	return categories
+}
+
+func stableCategoryOrder() []string {
+	return []string{"Intent", "Behavior", "Design", "Assurance", "Security", "Execution", "Traceability", "Config"}
+}
+
+func stableStringList(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return append([]string{}, values...)
+}
+
+func recommendationList(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return []string{}
+	}
+	return []string{value}
 }
 
 func renderText(card Scorecard, view string, details bool) string {
@@ -498,6 +605,7 @@ func renderGovernanceText(card Scorecard) string {
 }
 
 func renderJSON(card Scorecard) (string, error) {
+	card = EnsureStableContract(card)
 	content, err := json.MarshalIndent(card, "", "  ")
 	if err != nil {
 		return "", err

@@ -177,3 +177,97 @@ func TestSaaSQuickstartGuideContent(t *testing.T) {
 		}
 	}
 }
+
+func TestEnterpriseSDLCEvidenceGuideContent(t *testing.T) {
+	readmeContent, err := os.ReadFile("readme.md")
+	if err != nil {
+		t.Fatalf("read readme.md: %v", err)
+	}
+	if !strings.Contains(string(readmeContent), "docs/enterprise-sdlc-evidence.md") {
+		t.Fatal("README should link to enterprise SDLC evidence docs")
+	}
+
+	content, err := os.ReadFile("docs/enterprise-sdlc-evidence.md")
+	if err != nil {
+		t.Fatalf("read docs/enterprise-sdlc-evidence.md: %v", err)
+	}
+	guide := string(content)
+
+	expected := []string{
+		"# Enterprise SDLC Evidence with Bottleneck",
+		"## What Bottleneck Does",
+		"## What Bottleneck Does Not Do",
+		"## Why Git Is the System of Record",
+		"## Recommended Team Workflow",
+		"## Recommended CI Workflow",
+		"## Snapshot History",
+		"## Trend Analysis",
+		"## Evidence Explanation",
+		"## Leadership Report",
+		"## How to Interpret Results",
+		"## Common Enterprise Scenarios",
+		"## Frequently Asked Questions",
+		"Bottleneck is not a dashboard.",
+		"Bottleneck is not Jira replacement.",
+		"Bottleneck is not a project-management system.",
+		"Bottleneck is not a database-backed metrics warehouse.",
+		"Bottleneck is a local-first evidence system for understanding SDLC bottlenecks.",
+		"local files as the source of evidence",
+		"Git is the system of record",
+		"no external storage is required",
+		"No dashboard is required",
+		"Reports are generated from evidence, not opinion.",
+		"Developers get a structured way",
+		"Tech leads get a way",
+		"Product leaders get a way",
+		"Security teams get evidence",
+		"Leadership gets a decision-ready summary",
+		"bottleneck init --template saas",
+		"bottleneck ingest cucumber --file reports/cucumber.json",
+		"bottleneck ingest sarif --file reports/codeql.sarif",
+		"bottleneck ingest telemetry --file reports/telemetry.json",
+		"bottleneck scorecard",
+		"bottleneck snapshot",
+		"bottleneck trends",
+		"bottleneck explain",
+		"bottleneck report",
+		"bottleneck scorecard --env=production --format=json",
+		"bottleneck snapshot --env=production --label=ci",
+		"bottleneck trends --env=production --window=6",
+		"bottleneck report --env=production --format=markdown",
+		"examples/github-actions/bottleneck-evidence-report.yml",
+		"bottleneck/history/",
+		"bottleneck/reports/",
+		"does not commit generated files automatically",
+		"CI-generated artifacts",
+		"Committed snapshots",
+		"Proceed",
+		"Conditional",
+		"Block",
+		"Insufficient Evidence",
+		"improving trends",
+		"declining trends",
+		"stable trends",
+		"recovered categories",
+		"regressed categories",
+		"persistent bottleneck",
+		"Team is shipping quickly but validation is weak",
+		"Security is repeatedly discovered late",
+		"Requirements are implemented but not traceable",
+		"Production behavior does not match expected behavior",
+		"Leadership wants faster delivery but the SDLC evidence is declining",
+		"Does Bottleneck need a database?",
+		"Does Bottleneck replace Jira?",
+		"Do we need to commit snapshots?",
+		"Can CI generate reports without committing them?",
+		"What if we only have one snapshot?",
+		"What if evidence is missing?",
+		"How do teams use this in leadership reviews?",
+	}
+
+	for _, substring := range expected {
+		if !strings.Contains(guide, substring) {
+			t.Fatalf("expected enterprise SDLC evidence guide to contain %q", substring)
+		}
+	}
+}

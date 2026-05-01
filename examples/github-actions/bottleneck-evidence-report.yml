@@ -1,0 +1,47 @@
+name: Bottleneck Evidence Report
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bottleneck-evidence:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build Bottleneck
+        run: go build -o bottleneck-cli .
+
+      - name: Validate evidence
+        run: ./bottleneck-cli validate
+
+      - name: Generate scorecard
+        run: ./bottleneck-cli scorecard --format=markdown --details
+
+      - name: Create snapshot
+        run: ./bottleneck-cli snapshot --label=ci
+
+      - name: Generate trends
+        run: ./bottleneck-cli trends --format=markdown --out=bottleneck/reports/trend-summary.md
+
+      - name: Generate SDLC evidence report
+        run: ./bottleneck-cli report --format=markdown --out=bottleneck/reports/sdlc-evidence-report.md
+
+      - name: Upload Bottleneck reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottleneck-reports
+          path: |
+            bottleneck/history/
+            bottleneck/reports/

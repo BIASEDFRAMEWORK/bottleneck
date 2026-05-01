@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"bottleneck/internal/explainer"
 	"bottleneck/internal/models"
@@ -14,6 +15,9 @@ import (
 
 var explainEnv string
 var explainCapability string
+var explainCategory string
+var explainFormat string
+var explainOut string
 var explainStrict bool
 
 var explainCmd = &cobra.Command{
@@ -31,9 +35,22 @@ var explainCmd = &cobra.Command{
 			graphPtr = &graph
 		}
 
-		output, err := explainer.RenderWithGraph(result, graphPtr, explainCapability)
+		filter, err := explainFilter()
 		if err != nil {
 			return err
+		}
+
+		output, err := explainer.RenderWithOptions(result, graphPtr, explainer.Options{
+			Filter: filter,
+			Format: explainFormat,
+		})
+		if err != nil {
+			return err
+		}
+		if explainOut != "" {
+			if err := explainer.WriteOutput(explainOut, output+"\n"); err != nil {
+				return fmt.Errorf("write explanation output %s: %w", explainOut, err)
+			}
 		}
 
 		fmt.Println(output)
@@ -48,6 +65,21 @@ var explainCmd = &cobra.Command{
 func init() {
 	explainCmd.Flags().StringVar(&explainEnv, "env", "default", "environment config to use")
 	explainCmd.Flags().StringVar(&explainCapability, "capability", "", "single capability to explain")
+	explainCmd.Flags().StringVar(&explainCategory, "category", "", "single category to explain")
+	explainCmd.Flags().StringVar(&explainFormat, "format", explainer.FormatText, "output format: text, markdown, or json")
+	explainCmd.Flags().StringVar(&explainOut, "out", "", "optional file path to write rendered explanation")
 	explainCmd.Flags().BoolVar(&explainStrict, "strict", false, "treat placeholder and insufficient content as failures")
 	rootCmd.AddCommand(explainCmd)
+}
+
+func explainFilter() (string, error) {
+	category := strings.TrimSpace(explainCategory)
+	capability := strings.TrimSpace(explainCapability)
+	if category != "" && capability != "" && !strings.EqualFold(category, capability) {
+		return "", fmt.Errorf("use either --category or --capability, not both")
+	}
+	if category != "" {
+		return category, nil
+	}
+	return capability, nil
 }

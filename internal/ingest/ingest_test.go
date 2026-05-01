@@ -34,6 +34,9 @@ func TestNormalizeCucumberCreatesAssuranceArtifact(t *testing.T) {
 	if len(result.Warnings) != 0 {
 		t.Fatalf("expected no warnings, got %v", result.Warnings)
 	}
+	if artifact.Evidence[0].GeneratedBy != "cucumber" || artifact.Evidence[0].Confidence != "high" || artifact.Evidence[0].Provenance == "" {
+		t.Fatalf("expected provenance fields on cucumber evidence, got %#v", artifact.Evidence[0])
+	}
 }
 
 func TestNormalizeCucumberReportsUnmappedAndUnmatchedBehavior(t *testing.T) {
@@ -556,6 +559,80 @@ func TestIngestCodeQLInvalidInputReturnsError(t *testing.T) {
 	_, err := IngestCodeQL(tempDir, filePath, "", false, false)
 	if err == nil {
 		t.Fatal("expected error for invalid SARIF input")
+	}
+}
+
+func TestIngestJUnitCreatesAssuranceArtifact(t *testing.T) {
+	rootPath := t.TempDir()
+	filePath := filepath.Join(rootPath, "junit.xml")
+	content := `<testsuite tests="2" failures="1" skipped="0">
+  <testcase classname="Checkout BEHAVIOR-001" name="happy path"></testcase>
+  <testcase classname="Checkout BEHAVIOR-002" name="declined card"><failure message="failed">expected retry</failure></testcase>
+</testsuite>`
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write junit file: %v", err)
+	}
+
+	result, err := IngestJUnit(rootPath, filePath, "", false, false)
+	if err != nil {
+		t.Fatalf("ingest junit: %v", err)
+	}
+	artifact := result.Artifact.(AssuranceArtifact)
+	if artifact.ScenariosTotal != 2 || artifact.ScenariosPassed != 1 || artifact.ScenariosFailed != 1 {
+		t.Fatalf("unexpected junit counts: %#v", artifact)
+	}
+	if len(artifact.Evidence) != 2 || artifact.Evidence[1].Status != "fail" || artifact.Evidence[1].Refs[0] != "BEHAVIOR-002" {
+		t.Fatalf("unexpected junit evidence: %#v", artifact.Evidence)
+	}
+	if artifact.Evidence[0].GeneratedBy != "junit" || artifact.Evidence[0].Confidence != "high" {
+		t.Fatalf("expected junit provenance fields, got %#v", artifact.Evidence[0])
+	}
+	assertWrittenArtifactContains(t, rootPath, DefaultAssuranceOutput, "ASSURANCE-002", "generated_by")
+}
+
+func TestIngestCoverageCreatesCoverageEvidence(t *testing.T) {
+	rootPath := t.TempDir()
+	filePath := filepath.Join(rootPath, "lcov.info")
+	content := "TN:\nSF:checkout-BEHAVIOR-003.go\nDA:1,1\nDA:2,0\nDA:3,1\nend_of_record\n"
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write lcov file: %v", err)
+	}
+
+	result, err := IngestCoverage(rootPath, filePath, "", false, false)
+	if err != nil {
+		t.Fatalf("ingest coverage: %v", err)
+	}
+	artifact := result.Artifact.(AssuranceArtifact)
+	if artifact.Coverage == nil || *artifact.Coverage < 0.66 || *artifact.Coverage > 0.67 {
+		t.Fatalf("expected 2/3 coverage, got %#v", artifact.Coverage)
+	}
+	if len(artifact.Evidence) != 1 || artifact.Evidence[0].Status != "warn" || artifact.Evidence[0].GeneratedBy != "lcov" {
+		t.Fatalf("unexpected coverage evidence: %#v", artifact.Evidence)
+	}
+	assertWrittenArtifactContains(t, rootPath, DefaultAssuranceOutput, "ASSURANCE-COVERAGE-001", "LCOV line coverage")
+}
+
+func TestMergeAssuranceIsIdempotentForSameSourceEvidence(t *testing.T) {
+	rootPath := t.TempDir()
+	filePath := filepath.Join(rootPath, "junit.xml")
+	content := `<testsuite tests="1" failures="0"><testcase classname="Checkout BEHAVIOR-001" name="happy path"></testcase></testsuite>`
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write junit file: %v", err)
+	}
+
+	first, err := IngestJUnit(rootPath, filePath, "", true, false)
+	if err != nil {
+		t.Fatalf("first ingest junit: %v", err)
+	}
+	second, err := IngestJUnit(rootPath, filePath, "", true, false)
+	if err != nil {
+		t.Fatalf("second ingest junit: %v", err)
+	}
+
+	firstArtifact := first.Artifact.(AssuranceArtifact)
+	secondArtifact := second.Artifact.(AssuranceArtifact)
+	if firstArtifact.ScenariosTotal != 1 || secondArtifact.ScenariosTotal != 1 || len(secondArtifact.Evidence) != 1 {
+		t.Fatalf("expected idempotent merge, first=%#v second=%#v", firstArtifact, secondArtifact)
 	}
 }
 

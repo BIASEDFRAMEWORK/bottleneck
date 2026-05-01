@@ -15,6 +15,7 @@ func TestWorkflowExamplesContainExpectedCommands(t *testing.T) {
 		"bottleneck-scorecard.yml",
 		"bottleneck-pr-gate.yml",
 		"bottleneck-saas-scorecard.yml",
+		"bottleneck-assessment.yml",
 	}
 
 	for _, example := range examples {
@@ -35,10 +36,17 @@ func TestWorkflowExamplesContainExpectedCommands(t *testing.T) {
 				t.Fatalf("expected workflow to build bottleneck in %s:\n%s", example, text)
 			}
 
-			for _, substring := range []string{"$GITHUB_STEP_SUMMARY", "scorecard", "--format=markdown"} {
+			for _, substring := range []string{"$GITHUB_STEP_SUMMARY", "--format=markdown"} {
 				if !strings.Contains(text, substring) {
 					t.Fatalf("expected %q in %s:\n%s", substring, example, text)
 				}
+			}
+			expectedSurface := "scorecard"
+			if strings.Contains(example, "assessment") {
+				expectedSurface = "assess"
+			}
+			if !strings.Contains(text, expectedSurface) {
+				t.Fatalf("expected %q in %s:\n%s", expectedSurface, example, text)
 			}
 
 			if strings.Contains(example, "validate") || strings.Contains(example, "gate") {
@@ -55,6 +63,87 @@ func TestWorkflowExamplesContainExpectedCommands(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAssessmentWorkflowIsCopyPasteSafe(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "github-actions", "bottleneck-assessment.yml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read assessment workflow example: %v", err)
+	}
+	text := string(content)
+
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("assessment workflow YAML should parse: %v\n%s", err, text)
+	}
+
+	expected := []string{
+		"name: bottleneck assessment",
+		"pull_request:",
+		"workflow_dispatch:",
+		"actions/checkout@v4",
+		"actions/setup-go@v5",
+		"go-version-file: go.mod",
+		"go build -o ./bin/bottleneck .",
+		"./bin/bottleneck discover",
+		"./bin/bottleneck ingest --auto",
+		"./bin/bottleneck assess --format=markdown >> \"$GITHUB_STEP_SUMMARY\"",
+		"./bin/bottleneck assess --format=json > bottleneck-assessment.json",
+		"actions/upload-artifact@v4",
+		"name: bottleneck-assessment",
+		"permissions:",
+		"contents: read",
+	}
+	for _, substring := range expected {
+		if !strings.Contains(text, substring) {
+			t.Fatalf("expected assessment workflow to contain %q:\n%s", substring, text)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"secrets.",
+		"/Users/",
+		"/tmp/",
+		"/private/",
+		"~/",
+		"pull-requests: write",
+		"actions/github-script",
+		"diagnose --gate",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("assessment workflow should not contain %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestAssessmentWorkflowReferencesValidCommands(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "github-actions", "bottleneck-assessment.yml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read assessment workflow example: %v", err)
+	}
+	text := string(content)
+
+	commands := map[string]string{
+		"discover": "discover.go",
+		"ingest":   "ingest.go",
+		"assess":   "assess.go",
+	}
+	for command, file := range commands {
+		if !strings.Contains(text, "bottleneck "+command) {
+			t.Fatalf("expected assessment workflow to reference bottleneck %s:\n%s", command, text)
+		}
+		commandPath := filepath.Join("..", "..", "cmd", file)
+		source, err := os.ReadFile(commandPath)
+		if err != nil {
+			t.Fatalf("read command source %s: %v", file, err)
+		}
+		if !strings.Contains(string(source), `Use:   "`+command+`"`) &&
+			!strings.Contains(string(source), `Use:     "`+command+`"`) {
+			t.Fatalf("expected cmd/%s to register %q command", file, command)
+		}
 	}
 }
 
@@ -132,7 +221,7 @@ func TestSaaSScorecardWorkflowReferencesValidCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read command source %s: %v", file, err)
 		}
-		if !strings.Contains(string(source), `Use:   "`+command+`"`) {
+		if !sourceRegistersCommand(string(source), command) {
 			t.Fatalf("expected cmd/%s to register %q command", file, command)
 		}
 	}
@@ -224,8 +313,13 @@ func TestEvidenceReportWorkflowReferencesValidCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read command source %s: %v", file, err)
 		}
-		if !strings.Contains(string(source), `Use:   "`+command+`"`) {
+		if !sourceRegistersCommand(string(source), command) {
 			t.Fatalf("expected cmd/%s to register %q command", file, command)
 		}
 	}
+}
+
+func sourceRegistersCommand(source string, command string) bool {
+	return strings.Contains(source, `Use:   "`+command+`"`) ||
+		strings.Contains(source, `Use:     "`+command+`"`)
 }

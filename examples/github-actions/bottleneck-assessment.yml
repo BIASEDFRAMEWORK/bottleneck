@@ -1,0 +1,41 @@
+name: bottleneck assessment
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  assess:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build Bottleneck
+        run: go build -o ./bin/bottleneck .
+
+      - name: Discover evidence
+        run: ./bin/bottleneck discover
+
+      - name: Sync evidence
+        run: ./bin/bottleneck ingest --auto
+
+      - name: Write assessment summary
+        run: ./bin/bottleneck assess --format=markdown >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write assessment artifact
+        run: ./bin/bottleneck assess --format=json > bottleneck-assessment.json
+
+      - name: Upload assessment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottleneck-assessment
+          path: bottleneck-assessment.json

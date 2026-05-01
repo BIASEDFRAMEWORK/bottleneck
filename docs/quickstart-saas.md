@@ -26,7 +26,23 @@ bottleneck/docs/validation.md
 
 The sample release covers payment method updates, failed invoice retry, and duplicate-charge prevention. `BEHAVIOR-003` is the intentional Day One gap: payment retry behavior exists, but no mapped test evidence proves it yet.
 
-## 2. Read The Scorecard
+## 2. Run The Assessment
+
+```sh
+bottleneck assess
+```
+
+`assess` is the day-one surface for SDLC maturity, AI readiness, release friction, primary bottleneck, score confidence, and next action. It discovers supported local evidence and runs automatic ingestion before scoring. Use `--no-ingest` when you want a read-only assessment.
+
+Useful follow-up commands:
+
+```sh
+bottleneck discover
+bottleneck evidence sync
+bottleneck explain-score
+```
+
+## 3. Read The Scorecard
 
 ```sh
 bottleneck scorecard
@@ -55,9 +71,9 @@ Next Action:
 Add assurance evidence for payment retry behavior. Map it to BEHAVIOR-003.
 ```
 
-The scorecard is the main terminal surface. It summarizes the delivery decision before raw validation findings.
+The scorecard is the focused release-readiness terminal surface. It summarizes the delivery decision before raw validation findings.
 
-## 3. Inspect Details When Needed
+## 4. Inspect Details When Needed
 
 ```sh
 bottleneck scorecard --details
@@ -77,7 +93,7 @@ Traceability:
     - bottleneck/behavior/behavior-spec.md BEHAVIOR-003 has no mapped test evidence (-25)
 ```
 
-## 4. Validate Evidence Quality
+## 5. Validate Evidence Quality
 
 ```sh
 bottleneck validate
@@ -96,7 +112,7 @@ Environment: default
 
 `validate` reports the raw validation status. Warning-only output exits `0`; failures exit `1`.
 
-## 5. Capture JSON Output
+## 6. Capture JSON Output
 
 ```sh
 bottleneck scorecard --format=json
@@ -118,7 +134,7 @@ Excerpt:
 }
 ```
 
-## 6. Choose An Environment
+## 7. Choose An Environment
 
 The SaaS starter includes inherited thresholds for `local`, `dev`, `test`, `stage`, and `production`.
 
@@ -143,7 +159,7 @@ Effective Thresholds:
 
 If an environment name is invalid, Bottleneck fails with the unknown name and the supported environment list. Fix the `--env` value or add that environment under `bottleneck/config.yaml`.
 
-## 7. Diagnose The Bottleneck
+## 8. Diagnose The Bottleneck
 
 ```sh
 bottleneck diagnose
@@ -160,7 +176,7 @@ Inspect: bottleneck trace BEHAVIOR-003
 Relevant Evidence: BEHAVIOR-003
 ```
 
-## 8. Trace BEHAVIOR-003
+## 9. Trace BEHAVIOR-003
 
 ```sh
 bottleneck trace BEHAVIOR-003
@@ -185,7 +201,7 @@ Add assurance evidence for payment retry behavior.
 
 `bottleneck trace --id BEHAVIOR-003` is also supported.
 
-## 9. Ingest Sample Evidence
+## 10. Ingest Sample Evidence
 
 The repository includes runnable sample reports under `examples/saas/reports/`. In a real SaaS app these files usually come from CI, test runners, security scanners, and telemetry exports. For a local trial, put the sample files under `reports/` in the project you initialized:
 
@@ -229,6 +245,17 @@ Links IDs: evidence entries preserve their `ASSURANCE-*` IDs and `BEHAVIOR-*` re
 
 `cucumber` and `test-summary` both write normalized assurance evidence. Running the second command replaces the same file unless you pass `--merge`.
 
+### JUnit And LCOV
+
+```sh
+bottleneck ingest junit --file reports/junit.xml --merge
+bottleneck ingest coverage --file coverage/lcov.info --merge
+```
+
+Represents: test runner XML output and line coverage from existing CI.
+Writes: `bottleneck/assurance/results.json`.
+Updates: Assurance evidence with provenance fields so `explain-score` can show where the score came from.
+
 ### Telemetry
 
 ```sh
@@ -249,7 +276,14 @@ bottleneck trace BEHAVIOR-003
 
 After ingesting the Cucumber or test-summary sample, Assurance changes from `Warn` to `Pass` because `BEHAVIOR-003` now has mapped passing test evidence. SARIF updates Security, and telemetry updates Execution. Use `--dry-run --format=json` to parse a report without writing normalized evidence; invalid JSON fails cleanly with a parse error.
 
-## 10. Fix The Evidence Gap Manually
+To let Bottleneck choose supported inputs automatically, run:
+
+```sh
+bottleneck discover
+bottleneck ingest --auto
+```
+
+## 11. Fix The Evidence Gap Manually
 
 Add mapped assurance evidence for `BEHAVIOR-003` in `bottleneck/assurance/results.json`:
 
@@ -286,7 +320,7 @@ Release Recommendation: Proceed
 Primary Bottleneck: None
 ```
 
-## 11. Break And Restore The Link
+## 12. Break And Restore The Link
 
 To see the diagnosis return, remove `BEHAVIOR-003` from `ASSURANCE-003.refs` or remove `ASSURANCE-003` from the behavior refs, then run:
 
@@ -301,7 +335,7 @@ bottleneck validate
 bottleneck scorecard
 ```
 
-## 12. Add CI
+## 13. Add CI
 
 Use the Day-One SaaS workflow example in `examples/github-actions/`:
 

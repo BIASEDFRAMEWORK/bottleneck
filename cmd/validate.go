@@ -17,8 +17,9 @@ var validateStrict bool
 var validateGitHubAnnotations bool
 
 var validateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Check evidence files for missing, thin, or placeholder content",
+	Use:     "validate",
+	Aliases: []string{"check"},
+	Short:   "Check evidence files for missing, thin, or placeholder content",
 	Run: func(cmd *cobra.Command, args []string) {
 		engine := validator.NewEngine(".", validateEnv, validator.WithStrictMode(validateStrict))
 		result := engine.Validate()

@@ -54,7 +54,12 @@ func TestREADMESaaSQuickstartContent(t *testing.T) {
 
 	expected := []string{
 		"## SaaS Team Quickstart",
+		"## Developer Trust Quickstart",
 		"bottleneck init --template saas",
+		"bottleneck assess",
+		"bottleneck discover",
+		"bottleneck evidence sync",
+		"bottleneck explain-score",
 		"bottleneck validate",
 		"bottleneck scorecard",
 		"bottleneck scorecard --format=json",
@@ -89,6 +94,9 @@ func TestREADMESaaSQuickstartContent(t *testing.T) {
 		"bottleneck ingest telemetry --file reports/telemetry.json",
 		"Minimal CI usage",
 		"examples/github-actions/bottleneck-saas-scorecard.yml",
+		"examples/github-actions/bottleneck-assessment.yml",
+		"docs/scoring-trust.md",
+		"docs/github-actions.md",
 		"cp examples/github-actions/bottleneck-saas-scorecard.yml .github/workflows/bottleneck.yml",
 		"GitHub Actions step summary",
 		"bottleneck diagnose --format=github",
@@ -117,6 +125,10 @@ func TestSaaSQuickstartGuideContent(t *testing.T) {
 	expected := []string{
 		"# SaaS Day-One Quickstart",
 		"bottleneck init --template saas",
+		"bottleneck assess",
+		"bottleneck discover",
+		"bottleneck evidence sync",
+		"bottleneck explain-score",
 		"bottleneck validate",
 		"bottleneck scorecard",
 		"bottleneck scorecard --details",
@@ -143,6 +155,8 @@ func TestSaaSQuickstartGuideContent(t *testing.T) {
 		"Inspect: bottleneck trace BEHAVIOR-003",
 		"examples/saas/reports/",
 		"bottleneck ingest cucumber --file reports/cucumber.json",
+		"bottleneck ingest junit --file reports/junit.xml",
+		"bottleneck ingest coverage --file coverage/lcov.info",
 		"bottleneck ingest sarif --file reports/codeql.sarif",
 		"bottleneck ingest test-summary --file reports/test-summary.json",
 		"bottleneck ingest telemetry --file reports/telemetry.json",
@@ -174,6 +188,51 @@ func TestSaaSQuickstartGuideContent(t *testing.T) {
 	for _, substring := range expected {
 		if !strings.Contains(guide, substring) {
 			t.Fatalf("expected SaaS quickstart guide to contain %q", substring)
+		}
+	}
+}
+
+func TestDeveloperTrustDocsContent(t *testing.T) {
+	scoring, err := os.ReadFile("docs/scoring-trust.md")
+	if err != nil {
+		t.Fatalf("read docs/scoring-trust.md: %v", err)
+	}
+	scoringText := string(scoring)
+	for _, substring := range []string{
+		"Bottleneck does not ask teams to trust a black-box score.",
+		"bottleneck explain-score",
+		"Maturity",
+		"Release recommendation",
+		"Primary bottleneck",
+		"Score confidence",
+		"AI readiness",
+		"generated_by",
+		"provenance",
+		"Freshness Defaults",
+	} {
+		if !strings.Contains(scoringText, substring) {
+			t.Fatalf("expected scoring trust docs to contain %q", substring)
+		}
+	}
+
+	workflow, err := os.ReadFile("docs/github-actions.md")
+	if err != nil {
+		t.Fatalf("read docs/github-actions.md: %v", err)
+	}
+	workflowText := string(workflow)
+	for _, substring := range []string{
+		"examples/github-actions/bottleneck-assessment.yml",
+		"bottleneck discover",
+		"bottleneck ingest --auto",
+		"bottleneck assess --format=markdown",
+		"bottleneck assess --format=json",
+		"does not require a GitHub token",
+		"does not require a GitHub token, network calls, a database, or external Bottleneck service",
+		"does not require",
+		"exits successfully by default",
+	} {
+		if !strings.Contains(workflowText, substring) {
+			t.Fatalf("expected GitHub Actions docs to contain %q", substring)
 		}
 	}
 }

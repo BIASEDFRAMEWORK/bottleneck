@@ -2,18 +2,44 @@
 
 Bottleneck helps a SaaS team diagnose delivery risk before a release by reading local evidence artifacts, producing a release readiness scorecard, and naming the primary bottleneck diagnosis with the next evidence action. It does not replace tests, CI, security scanners, or observability tools; it connects their outputs so a team can see whether behavior, intent, design, assurance, security, and execution evidence are strong enough to ship.
 
+Bottleneck is a CLI for measuring SDLC maturity from local engineering evidence. Bottleneck tells you what is blocking release confidence and what evidence proves it.
+
+## Developer Trust Quickstart
+
+Get your first SDLC maturity assessment in 5 minutes:
+
+```sh
+bottleneck init --template saas
+bottleneck assess
+bottleneck trace BEHAVIOR-003
+```
+
+Connect Bottleneck to evidence your team already produces:
+
+```sh
+bottleneck discover
+bottleneck evidence sync
+bottleneck assess
+bottleneck explain-score
+```
+
+Discovery and automatic ingestion recognize common Cucumber, JUnit, LCOV, SARIF or CodeQL, telemetry JSON, GitHub Actions, design docs, and native Bottleneck artifacts. `bottleneck evidence sync` is an alias for `bottleneck ingest --auto`; `bottleneck check` is an alias for `bottleneck validate`; `bottleneck maturity` is an alias for `bottleneck assess`.
+
+Make SDLC maturity visible in every pull request by adding the non-punitive GitHub Actions workflow in [examples/github-actions/bottleneck-assessment.yml](examples/github-actions/bottleneck-assessment.yml). See [docs/github-actions.md](docs/github-actions.md) and [docs/scoring-trust.md](docs/scoring-trust.md) for the scoring and CI model.
+
 ## SaaS Team Quickstart
 
 Create a Subscription Billing Release starter:
 
 ```sh
 bottleneck init --template saas
+bottleneck assess
 bottleneck scorecard
 bottleneck diagnose
 bottleneck trace BEHAVIOR-003
 ```
 
-`scorecard` is the primary Day-One command: it puts the release recommendation, primary bottleneck, category results, why it matters, and next action at the top of the terminal output. Use `validate` as a supporting evidence-quality check and `scorecard --details` when you need the raw evidence, thresholds, missing evidence, and score impacts.
+`assess` is the primary Day-One command for maturity, AI readiness, release friction, primary bottleneck, score confidence, and next action. `scorecard` is the primary Day-One command when you only need the focused release-readiness surface: it puts the release recommendation, primary bottleneck, category results, why it matters, and next action at the top of the terminal output. Use `validate` as a supporting evidence-quality check and `scorecard --details` when you need the raw evidence, thresholds, missing evidence, and score impacts.
 
 The SaaS template creates:
 
@@ -111,9 +137,12 @@ Sample SaaS report files live in `examples/saas/reports/` so you can try ingesti
 
 ```sh
 bottleneck ingest cucumber --file reports/cucumber.json
+bottleneck ingest junit --file reports/junit.xml
+bottleneck ingest coverage --file coverage/lcov.info
 bottleneck ingest sarif --file reports/codeql.sarif
 bottleneck ingest test-summary --file reports/test-summary.json
 bottleneck ingest telemetry --file reports/telemetry.json
+bottleneck ingest --auto
 ```
 
 The Cucumber and test-summary samples write `bottleneck/assurance/results.json` and can cover `BEHAVIOR-003` with mapped `ASSURANCE-*` evidence. The SARIF sample writes `bottleneck/security/guardrails.json` and links a low-severity `SECURITY-001` finding to billing retry behavior. The telemetry sample writes `bottleneck/execution/telemetry.json` and links `EXECUTION-001` to the billing behaviors and assurance IDs.

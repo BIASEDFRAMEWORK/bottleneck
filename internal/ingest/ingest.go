@@ -1,7 +1,9 @@
 package ingest
 
 import (
+	"bufio"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,18 +29,22 @@ var (
 )
 
 type EvidenceItem struct {
-	ID         string   `json:"id,omitempty"`
-	Type       string   `json:"type"`
-	Source     string   `json:"source"`
-	Refs       []string `json:"refs,omitempty"`
-	Severity   string   `json:"severity,omitempty"`
-	RuleID     string   `json:"rule_id,omitempty"`
-	RuleName   string   `json:"rule_name,omitempty"`
-	Path       string   `json:"path,omitempty"`
-	Line       *int     `json:"line,omitempty"`
-	Status     string   `json:"status"`
-	Summary    string   `json:"summary,omitempty"`
-	IngestedAt string   `json:"ingested_at,omitempty"`
+	ID          string   `json:"id,omitempty"`
+	Type        string   `json:"type"`
+	Source      string   `json:"source"`
+	Refs        []string `json:"refs,omitempty"`
+	Severity    string   `json:"severity,omitempty"`
+	RuleID      string   `json:"rule_id,omitempty"`
+	RuleName    string   `json:"rule_name,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Line        *int     `json:"line,omitempty"`
+	Status      string   `json:"status"`
+	Summary     string   `json:"summary,omitempty"`
+	GeneratedBy string   `json:"generated_by,omitempty"`
+	GeneratedAt string   `json:"generated_at,omitempty"`
+	IngestedAt  string   `json:"ingested_at,omitempty"`
+	Confidence  string   `json:"confidence,omitempty"`
+	Provenance  string   `json:"provenance,omitempty"`
 }
 
 type AssuranceArtifact struct {
@@ -199,6 +205,10 @@ func sampleFormatPath(kind string) string {
 		return "examples/saas/reports/test-summary.json"
 	case "telemetry":
 		return "examples/saas/reports/telemetry.json"
+	case "junit":
+		return "reports/junit.xml"
+	case "coverage":
+		return "coverage/lcov.info"
 	default:
 		return "examples/saas/reports/"
 	}
@@ -271,6 +281,68 @@ func IngestTestSummary(rootPath, filePath, outPath string, merge, dryRun bool) (
 	return IngestSummary{Artifact: artifact}, nil
 }
 
+func IngestJUnit(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return IngestSummary{}, ingestInputError("junit", filePath, "read junit file", err)
+	}
+
+	artifact, warnings, err := normalizeJUnit(content, filePath)
+	if err != nil {
+		return IngestSummary{}, ingestInputError("junit", filePath, "parse junit xml", err)
+	}
+	warnings = append(warnings, unmatchedBehaviorWarnings(rootPath, artifact)...)
+	if outPath == "" {
+		outPath = DefaultAssuranceOutput
+	}
+
+	if merge {
+		artifact, err = mergeAssuranceArtifact(rootPath, outPath, artifact)
+		if err != nil {
+			return IngestSummary{}, err
+		}
+	}
+
+	if !dryRun {
+		if err := writeJSONArtifact(rootPath, outPath, artifact); err != nil {
+			return IngestSummary{}, err
+		}
+	}
+
+	return IngestSummary{Artifact: artifact, Warnings: warnings}, nil
+}
+
+func IngestCoverage(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return IngestSummary{}, ingestInputError("coverage", filePath, "read coverage file", err)
+	}
+	defer file.Close()
+
+	artifact, warnings, err := normalizeLCOV(file, filePath)
+	if err != nil {
+		return IngestSummary{}, ingestInputError("coverage", filePath, "parse lcov file", err)
+	}
+	if outPath == "" {
+		outPath = DefaultAssuranceOutput
+	}
+
+	if merge {
+		artifact, err = mergeAssuranceArtifact(rootPath, outPath, artifact)
+		if err != nil {
+			return IngestSummary{}, err
+		}
+	}
+
+	if !dryRun {
+		if err := writeJSONArtifact(rootPath, outPath, artifact); err != nil {
+			return IngestSummary{}, err
+		}
+	}
+
+	return IngestSummary{Artifact: artifact, Warnings: warnings}, nil
+}
+
 func IngestTelemetry(rootPath, filePath, outPath string, merge, dryRun bool) (IngestSummary, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -290,17 +362,18 @@ func IngestTelemetry(rootPath, filePath, outPath string, merge, dryRun bool) (In
 		if input.Evidence[i].Source == "" {
 			input.Evidence[i].Source = filePath
 		}
-		input.Evidence[i].IngestedAt = currentTime().Format(time.RFC3339)
+		enrichEvidence(&input.Evidence[i], "telemetry", confidenceForRefs(input.Evidence[i].Refs))
 	}
 	if len(input.Evidence) == 0 {
-		input.Evidence = []EvidenceItem{{
-			ID:         "EXECUTION-001",
-			Type:       "telemetry",
-			Source:     filePath,
-			Status:     "pass",
-			Summary:    "Telemetry snapshot ingested.",
-			IngestedAt: currentTime().Format(time.RFC3339),
-		}}
+		item := EvidenceItem{
+			ID:      "EXECUTION-001",
+			Type:    "telemetry",
+			Source:  filePath,
+			Status:  "pass",
+			Summary: "Telemetry snapshot ingested.",
+		}
+		enrichEvidence(&item, "telemetry", "medium")
+		input.Evidence = []EvidenceItem{item}
 	}
 
 	if outPath == "" {
@@ -347,8 +420,54 @@ func mergeAssuranceArtifact(rootPath, outPath string, artifact AssuranceArtifact
 		return AssuranceArtifact{}, err
 	}
 
-	artifact.Evidence = mergeEvidence(existing.Evidence, artifact.Evidence)
-	return artifact, nil
+	if allIncomingEvidenceAlreadyPresent(existing.Evidence, artifact.Evidence) {
+		return existing, nil
+	}
+
+	merged := artifact
+	if artifact.ScenariosTotal == 0 && existing.ScenariosTotal > 0 {
+		merged.ScenariosTotal = existing.ScenariosTotal
+		merged.ScenariosPassed = existing.ScenariosPassed
+		merged.ScenariosFailed = existing.ScenariosFailed
+		merged.Failures = existing.Failures
+		merged.TestsSkipped = existing.TestsSkipped
+	} else if artifact.ScenariosTotal > 0 && existing.ScenariosTotal > 0 {
+		merged.ScenariosTotal = existing.ScenariosTotal + artifact.ScenariosTotal
+		merged.ScenariosPassed = existing.ScenariosPassed + artifact.ScenariosPassed
+		merged.ScenariosFailed = existing.ScenariosFailed + artifact.ScenariosFailed
+		merged.Failures = append(existing.Failures, artifact.Failures...)
+		if existing.TestsSkipped != nil || artifact.TestsSkipped != nil {
+			totalSkipped := intValue(existing.TestsSkipped) + intValue(artifact.TestsSkipped)
+			merged.TestsSkipped = &totalSkipped
+		}
+	}
+	if artifact.Coverage == nil && existing.Coverage != nil {
+		merged.Coverage = existing.Coverage
+	}
+	merged.Evidence = mergeEvidence(existing.Evidence, artifact.Evidence)
+	return merged, nil
+}
+
+func allIncomingEvidenceAlreadyPresent(existing, incoming []EvidenceItem) bool {
+	if len(incoming) == 0 {
+		return false
+	}
+	index := map[string]struct{}{}
+	for _, item := range existing {
+		if key := evidenceKey(item); key != "" {
+			index[key] = struct{}{}
+		}
+	}
+	for _, item := range incoming {
+		key := evidenceKey(item)
+		if key == "" {
+			return false
+		}
+		if _, ok := index[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func mergeSecurityArtifact(rootPath, outPath string, artifact SecurityArtifact) (SecurityArtifact, error) {
@@ -381,21 +500,38 @@ func mergeEvidence(existing, incoming []EvidenceItem) []EvidenceItem {
 	index := map[string]struct{}{}
 	merged := make([]EvidenceItem, 0, len(existing)+len(incoming))
 	for _, item := range existing {
-		if item.ID != "" {
-			index[item.ID] = struct{}{}
+		if key := evidenceKey(item); key != "" {
+			index[key] = struct{}{}
 		}
 		merged = append(merged, item)
 	}
 	for _, item := range incoming {
-		if item.ID != "" {
-			if _, ok := index[item.ID]; ok {
+		if key := evidenceKey(item); key != "" {
+			if _, ok := index[key]; ok {
 				continue
 			}
-			index[item.ID] = struct{}{}
+			index[key] = struct{}{}
 		}
 		merged = append(merged, item)
 	}
 	return merged
+}
+
+func evidenceKey(item EvidenceItem) string {
+	if item.ID == "" {
+		return ""
+	}
+	if item.Source != "" {
+		return item.Source + "\x00" + item.ID
+	}
+	return item.ID
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func readExistingAssuranceArtifact(rootPath, outPath string) (AssuranceArtifact, error) {
@@ -455,6 +591,7 @@ func normalizeCucumber(report cucumberReport, source string) (AssuranceArtifact,
 
 			refs := extractBehaviorRefs(element.Tags)
 			refs = append(refs, extractBehaviorRefs(feature.Tags)...)
+			refs = append(refs, extractEvidenceRefsFromText(feature.Name+" "+element.Name)...)
 			refs = uniqueStrings(refs)
 
 			summary := element.Name
@@ -469,15 +606,16 @@ func normalizeCucumber(report cucumberReport, source string) (AssuranceArtifact,
 				warnings = append(warnings, fmt.Sprintf("unmapped scenario %q has no BEHAVIOR-* tags", element.Name))
 			}
 
-			evidence = append(evidence, EvidenceItem{
-				ID:         fmt.Sprintf("ASSURANCE-%03d", len(evidence)+1),
-				Type:       "cucumber",
-				Source:     source,
-				Refs:       refs,
-				Status:     status,
-				Summary:    summary,
-				IngestedAt: currentTime().Format(time.RFC3339),
-			})
+			item := EvidenceItem{
+				ID:      fmt.Sprintf("ASSURANCE-%03d", len(evidence)+1),
+				Type:    "cucumber",
+				Source:  source,
+				Refs:    refs,
+				Status:  status,
+				Summary: summary,
+			}
+			enrichEvidence(&item, "cucumber", confidenceForRefs(refs))
+			evidence = append(evidence, item)
 		}
 	}
 
@@ -561,31 +699,33 @@ func normalizeSARIF(report sarifReport, source string) SecurityArtifact {
 			}
 			refs := extractSARIFRefs(result.Properties, rule.Properties)
 
-			evidence = append(evidence, EvidenceItem{
-				ID:         fmt.Sprintf("SECURITY-%03d", len(evidence)+1),
-				Type:       "sarif",
-				Source:     source,
-				Refs:       refs,
-				Severity:   severity,
-				RuleID:     result.RuleID,
-				RuleName:   rule.Name,
-				Path:       path,
-				Line:       line,
-				Status:     "fail",
-				Summary:    message,
-				IngestedAt: currentTime().Format(time.RFC3339),
-			})
+			item := EvidenceItem{
+				ID:       fmt.Sprintf("SECURITY-%03d", len(evidence)+1),
+				Type:     "sarif",
+				Source:   source,
+				Refs:     refs,
+				Severity: severity,
+				RuleID:   result.RuleID,
+				RuleName: rule.Name,
+				Path:     path,
+				Line:     line,
+				Status:   "fail",
+				Summary:  message,
+			}
+			enrichEvidence(&item, "sarif", confidenceForRefs(refs))
+			evidence = append(evidence, item)
 		}
 	}
 	if violations == 0 {
-		evidence = append(evidence, EvidenceItem{
-			ID:         "SECURITY-001",
-			Type:       "sarif",
-			Source:     source,
-			Status:     "pass",
-			Summary:    "SARIF scan completed with no findings.",
-			IngestedAt: currentTime().Format(time.RFC3339),
-		})
+		item := EvidenceItem{
+			ID:      "SECURITY-001",
+			Type:    "sarif",
+			Source:  source,
+			Status:  "pass",
+			Summary: "SARIF scan completed with no findings.",
+		}
+		enrichEvidence(&item, "sarif", "medium")
+		evidence = append(evidence, item)
 	}
 
 	return SecurityArtifact{
@@ -620,11 +760,169 @@ func normalizeTestSummary(input TestSummaryInput, source string) (AssuranceArtif
 		if item.Source == "" {
 			item.Source = source
 		}
-		item.IngestedAt = currentTime().Format(time.RFC3339)
+		enrichEvidence(&item, "test-summary", confidenceForRefs(item.Refs))
 		artifact.Evidence = append(artifact.Evidence, item)
 	}
 
 	return artifact, nil
+}
+
+func normalizeJUnit(content []byte, source string) (AssuranceArtifact, []string, error) {
+	var suites junitTestSuites
+	if err := xml.Unmarshal(content, &suites); err != nil {
+		var suite junitTestSuite
+		if suiteErr := xml.Unmarshal(content, &suite); suiteErr != nil {
+			return AssuranceArtifact{}, nil, err
+		}
+		suites = junitTestSuites{
+			Tests:      suite.Tests,
+			Failures:   suite.Failures,
+			Errors:     suite.Errors,
+			Skipped:    suite.Skipped,
+			TestSuites: []junitTestSuite{suite},
+		}
+	}
+
+	testCases := suites.allTestCases()
+	total := 0
+	passed := 0
+	failed := 0
+	skipped := 0
+	failures := []string{}
+	evidence := []EvidenceItem{}
+	warnings := []string{}
+
+	for _, testCase := range testCases {
+		total++
+		status := "pass"
+		if testCase.isFailed() {
+			status = "fail"
+			failed++
+			failures = append(failures, testCase.displayName())
+		} else if testCase.isSkipped() {
+			status = "warn"
+			skipped++
+		} else {
+			passed++
+		}
+		refs := extractEvidenceRefsFromText(testCase.ClassName + " " + testCase.Name)
+		if len(refs) == 0 {
+			warnings = append(warnings, fmt.Sprintf("unmapped JUnit test %q has no evidence refs", testCase.displayName()))
+		}
+
+		item := EvidenceItem{
+			ID:      fmt.Sprintf("ASSURANCE-%03d", len(evidence)+1),
+			Type:    "junit",
+			Source:  source,
+			Refs:    refs,
+			Status:  status,
+			Summary: testCase.displayName(),
+		}
+		enrichEvidence(&item, "junit", confidenceForRefs(refs))
+		evidence = append(evidence, item)
+	}
+
+	if len(testCases) == 0 {
+		total = suites.Tests
+		failed = suites.Failures + suites.Errors
+		skipped = suites.Skipped
+		passed = total - failed - skipped
+		if passed < 0 {
+			passed = 0
+		}
+		status := "pass"
+		if failed > 0 {
+			status = "fail"
+			failures = append(failures, fmt.Sprintf("%d JUnit tests failed", failed))
+		} else if skipped > 0 {
+			status = "warn"
+		}
+		item := EvidenceItem{
+			ID:      "ASSURANCE-001",
+			Type:    "junit",
+			Source:  source,
+			Status:  status,
+			Summary: "JUnit test suite summary ingested.",
+		}
+		enrichEvidence(&item, "junit", "medium")
+		evidence = append(evidence, item)
+	}
+
+	if total == 0 {
+		warnings = append(warnings, "no JUnit tests found")
+	}
+
+	skippedPtr := skipped
+	return AssuranceArtifact{
+		ScenariosTotal:  total,
+		ScenariosPassed: passed,
+		ScenariosFailed: failed,
+		Failures:        failures,
+		TestsSkipped:    &skippedPtr,
+		Evidence:        evidence,
+	}, warnings, nil
+}
+
+func normalizeLCOV(file *os.File, source string) (AssuranceArtifact, []string, error) {
+	scanner := bufio.NewScanner(file)
+	executable := 0
+	covered := 0
+	currentFile := ""
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		switch {
+		case strings.HasPrefix(line, "SF:"):
+			currentFile = strings.TrimSpace(strings.TrimPrefix(line, "SF:"))
+		case strings.HasPrefix(line, "DA:"):
+			parts := strings.Split(strings.TrimPrefix(line, "DA:"), ",")
+			if len(parts) < 2 {
+				continue
+			}
+			hits, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err != nil {
+				continue
+			}
+			executable++
+			if hits > 0 {
+				covered++
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return AssuranceArtifact{}, nil, err
+	}
+
+	warnings := []string{}
+	ratio := 0.0
+	if executable > 0 {
+		ratio = float64(covered) / float64(executable)
+	} else {
+		warnings = append(warnings, "no executable LCOV lines found")
+	}
+
+	status := "warn"
+	if ratio >= 0.80 {
+		status = "pass"
+	}
+	summary := fmt.Sprintf("LCOV line coverage %.1f%% (%d/%d lines).", ratio*100, covered, executable)
+	refs := extractEvidenceRefsFromText(source + " " + currentFile)
+	item := EvidenceItem{
+		ID:      "ASSURANCE-COVERAGE-001",
+		Type:    "coverage",
+		Source:  source,
+		Refs:    refs,
+		Status:  status,
+		Summary: summary,
+	}
+	enrichEvidence(&item, "lcov", "medium")
+
+	return AssuranceArtifact{
+		Coverage: &ratio,
+		Evidence: []EvidenceItem{
+			item,
+		},
+	}, warnings, nil
 }
 
 func sarifRulesByID(run sarifRun) map[string]sarifRule {
@@ -814,6 +1112,46 @@ func extractBehaviorRefs(tags []tag) []string {
 	return refs
 }
 
+func extractEvidenceRefsFromText(text string) []string {
+	return uniqueStrings(evidenceIDPattern.FindAllString(text, -1))
+}
+
+func enrichEvidence(item *EvidenceItem, generatedBy string, confidence string) {
+	if item.IngestedAt == "" {
+		item.IngestedAt = currentTime().Format(time.RFC3339)
+	}
+	if item.GeneratedBy == "" {
+		item.GeneratedBy = generatedBy
+	}
+	if item.GeneratedAt == "" {
+		item.GeneratedAt = generatedAtForSource(item.Source)
+	}
+	if item.Confidence == "" {
+		item.Confidence = confidence
+	}
+	if item.Provenance == "" && item.Source != "" {
+		item.Provenance = fmt.Sprintf("Normalized from %s by bottleneck ingest.", item.Source)
+	}
+}
+
+func generatedAtForSource(source string) string {
+	if source == "" {
+		return ""
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return ""
+	}
+	return info.ModTime().UTC().Format(time.RFC3339)
+}
+
+func confidenceForRefs(refs []string) string {
+	if len(refs) > 0 {
+		return "high"
+	}
+	return "medium"
+}
+
 func uniqueStrings(items []string) []string {
 	seen := map[string]struct{}{}
 	result := []string{}
@@ -828,6 +1166,73 @@ func uniqueStrings(items []string) []string {
 		result = append(result, item)
 	}
 	return result
+}
+
+type junitTestSuites struct {
+	XMLName    xml.Name         `xml:"testsuites"`
+	Tests      int              `xml:"tests,attr"`
+	Failures   int              `xml:"failures,attr"`
+	Errors     int              `xml:"errors,attr"`
+	Skipped    int              `xml:"skipped,attr"`
+	TestSuites []junitTestSuite `xml:"testsuite"`
+	TestCases  []junitTestCase  `xml:"testcase"`
+}
+
+func (s junitTestSuites) allTestCases() []junitTestCase {
+	cases := append([]junitTestCase{}, s.TestCases...)
+	for _, suite := range s.TestSuites {
+		cases = append(cases, suite.allTestCases()...)
+	}
+	return cases
+}
+
+type junitTestSuite struct {
+	Name       string           `xml:"name,attr"`
+	Tests      int              `xml:"tests,attr"`
+	Failures   int              `xml:"failures,attr"`
+	Errors     int              `xml:"errors,attr"`
+	Skipped    int              `xml:"skipped,attr"`
+	TestCases  []junitTestCase  `xml:"testcase"`
+	TestSuites []junitTestSuite `xml:"testsuite"`
+}
+
+func (s junitTestSuite) allTestCases() []junitTestCase {
+	cases := append([]junitTestCase{}, s.TestCases...)
+	for _, suite := range s.TestSuites {
+		cases = append(cases, suite.allTestCases()...)
+	}
+	return cases
+}
+
+type junitTestCase struct {
+	Name      string             `xml:"name,attr"`
+	ClassName string             `xml:"classname,attr"`
+	Failures  []junitTestFailure `xml:"failure"`
+	Errors    []junitTestFailure `xml:"error"`
+	Skipped   []struct{}         `xml:"skipped"`
+}
+
+type junitTestFailure struct {
+	Message string `xml:"message,attr"`
+	Text    string `xml:",chardata"`
+}
+
+func (c junitTestCase) isFailed() bool {
+	return len(c.Failures) > 0 || len(c.Errors) > 0
+}
+
+func (c junitTestCase) isSkipped() bool {
+	return len(c.Skipped) > 0
+}
+
+func (c junitTestCase) displayName() string {
+	if c.ClassName == "" {
+		return c.Name
+	}
+	if c.Name == "" {
+		return c.ClassName
+	}
+	return c.ClassName + " " + c.Name
 }
 
 type cucumberReport []cucumberFeature
